@@ -1,0 +1,1045 @@
+//! Configuration management module for the SubX CLI application.
+//!
+//! This module provides functionality to initialize and load the application
+//! configuration from multiple sources, including files, environment variables,
+//! and command-line arguments.
+//!
+//! # Examples
+//!
+//! ```rust
+//! use subx_cli::{init_config_manager, load_config, Config, Result};
+//!
+//! fn main() -> Result<()> {
+//!     // Initialize global configuration manager and load settings
+//!     init_config_manager()?;
+//!     let config: Config = load_config()?;
+//!     // Use the loaded configuration as needed
+//!     println!("Loaded AI provider: {}", config.ai.provider);
+//!     Ok(())
+//! }
+//! ```
+
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+use crate::{Result, error::SubXError};
+use log::debug;
+
+// config crate imports for new configuration system
+use config::{Config as ConfigBuilder, Environment, File};
+
+// Submodules for unified configuration management core
+use crate::config::manager::ConfigManager;
+use crate::config::source::{CliSource, EnvSource, FileSource};
+use std::sync::{Mutex, OnceLock};
+
+static GLOBAL_CONFIG_MANAGER: OnceLock<Mutex<ConfigManager>> = OnceLock::new();
+
+/// Reset the global configuration manager (for testing only).
+///
+/// This function clears the internal OnceLock, allowing a fresh
+/// ConfigManager to be created on the next call to `init_config_manager()`.
+#[allow(invalid_reference_casting)]
+pub fn reset_global_config_manager() {
+    // Use ptr::write to reconstruct OnceLock, overwriting previous lock state.
+    unsafe {
+        // Get a mutable pointer to the static variable and overwrite previous state with a new OnceLock.
+        let dst = &GLOBAL_CONFIG_MANAGER as *const _ as *mut OnceLock<Mutex<ConfigManager>>;
+        std::ptr::write(dst, OnceLock::new());
+    }
+}
+
+/// Initialize the global configuration manager.
+///
+/// This function builds a new ConfigManager with file, environment,
+/// and CLI sources, loads the merged settings, and stores it in a
+/// global lock for subsequent retrieval.
+///
+/// # Errors
+///
+/// Returns a `SubXError::Config` variant if loading or parsing the
+/// configuration fails.
+pub fn init_config_manager() -> Result<()> {
+    let lock = GLOBAL_CONFIG_MANAGER.get_or_init(|| Mutex::new(ConfigManager::new()));
+
+    // Get config file path (environment variables should be set at this point)
+    let config_path = Config::config_file_path()?;
+    debug!("init_config_manager: Using config path: {:?}", config_path);
+    debug!(
+        "init_config_manager: Config path exists: {}",
+        config_path.exists()
+    );
+
+    let manager = ConfigManager::new()
+        .add_source(Box::new(FileSource::new(config_path)))
+        .add_source(Box::new(EnvSource::new()))
+        .add_source(Box::new(CliSource::new()));
+    debug!("init_config_manager: Created manager with 3 sources");
+
+    manager.load().map_err(|e| {
+        debug!("init_config_manager: Manager load failed: {}", e);
+        SubXError::config(e.to_string())
+    })?;
+    debug!("init_config_manager: Manager loaded successfully");
+
+    let mut guard = lock.lock().unwrap();
+    *guard = manager;
+    debug!("init_config_manager: Updated global manager");
+    Ok(())
+}
+
+/// Load the complete application configuration.
+///
+/// Retrieves the global ConfigManager initialized by `init_config_manager()`,
+/// reads the merged partial configuration, and converts it into a full `Config`.
+///
+/// # Errors
+///
+/// Returns a `SubXError::Config` if the global manager is not initialized
+/// or if validation or conversion to the complete `Config` fails.
+pub fn load_config() -> Result<Config> {
+    debug!("load_config: Getting global config manager");
+    let lock = GLOBAL_CONFIG_MANAGER.get().ok_or_else(|| {
+        debug!("load_config: Global config manager not initialized");
+        SubXError::config("global config manager not initialized; call init_config_manager() first")
+    })?;
+    debug!("load_config: Locking manager");
+    let manager = lock.lock().unwrap();
+    let config_lock = manager.config();
+    debug!("load_config: Getting partial config");
+    let partial_config = config_lock.read().unwrap();
+    debug!(
+        "load_config: partial_config.ai.max_sample_length = {:?}",
+        partial_config.ai.max_sample_length
+    );
+    debug!("load_config: Converting to complete config");
+    let config = partial_config.to_complete_config().map_err(|e| {
+        debug!("load_config: to_complete_config failed: {}", e);
+        SubXError::config(e.to_string())
+    })?;
+    debug!(
+        "load_config: Final config.ai.max_sample_length = {}",
+        config.ai.max_sample_length
+    );
+    Ok(config)
+}
+
+/// Full application configuration.
+///
+/// This struct aggregates all settings for AI integration, subtitle format
+/// conversion, synchronization, general options, and parallel execution.
+///
+/// # Fields
+///
+/// - `ai`: AI service configuration parameters.
+/// - `formats`: Subtitle format conversion settings.
+/// - `sync`: Audio-subtitle synchronization options.
+/// - `general`: General runtime options (e.g., backup and concurrency).
+/// - `parallel`: Parallel processing parameters.
+/// - `loaded_from`: Optional file path from which the configuration was loaded.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Config {
+    /// AI service configuration parameters.
+    pub ai: AIConfig,
+    /// Subtitle format conversion settings.
+    pub formats: FormatsConfig,
+    /// Audio-subtitle synchronization options.
+    pub sync: SyncConfig,
+    /// General runtime options (e.g., backup enabled, job limits).
+    pub general: GeneralConfig,
+    /// Parallel processing parameters.
+    pub parallel: ParallelConfig,
+    /// Source path of the loaded configuration file, if any.
+    #[serde(skip)]
+    pub loaded_from: Option<PathBuf>,
+}
+
+// Unit test: Config management functionality
+#[cfg(test)]
+#[serial_test::serial]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use std::env;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_default_config_creation() {
+        let config = Config::default();
+        assert_eq!(config.ai.provider, "openai");
+        assert_eq!(config.ai.model, "gpt-4o-mini");
+        assert_eq!(config.formats.default_output, "srt");
+        assert!(!config.general.backup_enabled);
+        assert_eq!(config.general.max_concurrent_jobs, 4);
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = Config::default();
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(toml_str.contains("[ai]"));
+        assert!(toml_str.contains("[formats]"));
+        assert!(toml_str.contains("[sync]"));
+        assert!(toml_str.contains("[general]"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_env_var_override() {
+        // Clear environment variables to avoid interference between tests
+        unsafe {
+            env::remove_var("OPENAI_API_KEY");
+            env::remove_var("SUBX_AI_MODEL");
+            env::set_var("OPENAI_API_KEY", "test-key-123");
+            env::set_var("SUBX_AI_MODEL", "gpt-3.5-turbo");
+        }
+
+        let mut config = Config::default();
+        config.apply_env_vars();
+        assert!(config.ai.api_key.is_some());
+        assert_eq!(config.ai.model, "gpt-3.5-turbo");
+
+        unsafe {
+            env::remove_var("OPENAI_API_KEY");
+            env::remove_var("SUBX_AI_MODEL");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_validation_missing_api_key() {
+        unsafe {
+            env::remove_var("OPENAI_API_KEY");
+        }
+        let config = Config::default();
+        // API Key validation is performed at runtime, does not affect loading
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_validation_invalid_provider() {
+        let mut config = Config::default();
+        config.ai.provider = "invalid-provider".to_string();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_file_save_and_load() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let original_config = Config::default();
+        let toml_content = toml::to_string_pretty(&original_config).unwrap();
+        std::fs::write(&config_path, toml_content).unwrap();
+
+        let file_content = std::fs::read_to_string(&config_path).unwrap();
+        let loaded_config: Config = toml::from_str(&file_content).unwrap();
+
+        assert_eq!(original_config.ai.model, loaded_config.ai.model);
+        assert_eq!(
+            original_config.formats.default_output,
+            loaded_config.formats.default_output
+        );
+    }
+
+    #[test]
+    fn test_config_merge() {
+        let mut base_config = Config::default();
+        let mut override_config = Config::default();
+        override_config.ai.model = "gpt-4".to_string();
+        override_config.general.backup_enabled = true;
+
+        base_config.merge(override_config);
+
+        assert_eq!(base_config.ai.model, "gpt-4");
+        assert!(base_config.general.backup_enabled);
+    }
+
+    #[test]
+    fn test_global_config_manager_initialization() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let test_config = Config::default();
+        let toml_content = toml::to_string_pretty(&test_config).unwrap();
+        std::fs::write(&config_path, toml_content).unwrap();
+
+        unsafe {
+            std::env::set_var("SUBX_CONFIG_PATH", config_path.to_str().unwrap());
+        }
+
+        assert!(init_config_manager().is_ok());
+
+        let loaded_config = load_config().unwrap();
+        assert_eq!(loaded_config.ai.model, test_config.ai.model);
+
+        unsafe {
+            std::env::remove_var("SUBX_CONFIG_PATH");
+        }
+    }
+
+    #[test]
+    fn test_env_var_override_with_new_system() {
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test-key-from-env");
+            std::env::set_var("SUBX_AI_MODEL", "gpt-4-from-env");
+        }
+
+        let _ = init_config_manager();
+        let config = load_config().unwrap();
+
+        assert_eq!(config.ai.api_key, Some("test-key-from-env".to_string()));
+        assert_eq!(config.ai.model, "gpt-4-from-env");
+
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+            std::env::remove_var("SUBX_AI_MODEL");
+        }
+    }
+}
+
+/// AI service provider configuration
+///
+/// This struct contains all configuration options for AI service providers, including API key, model settings, and retry strategy.
+/// Supports multiple AI providers, including OpenAI, Claude, etc.
+///
+/// # Fields
+///
+/// * `provider` - AI provider name (e.g. "openai", "claude")
+/// * `api_key` - API key for authentication
+/// * `model` - AI model name to use
+/// * `base_url` - API base URL
+/// * `max_sample_length` - Maximum sample length per request
+/// * `temperature` - AI generation creativity parameter (0.0-1.0)
+/// * `retry_attempts` - Number of retries on request failure
+/// * `retry_delay_ms` - Retry interval in milliseconds
+///
+/// # Examples
+///
+/// ```rust
+/// use subx_cli::config::AIConfig;
+///
+/// let ai_config = AIConfig {
+///     provider: "openai".to_string(),
+///     api_key: Some("your-api-key".to_string()),
+///     model: "gpt-4".to_string(),
+///     base_url: "https://api.openai.com/v1".to_string(),
+///     max_sample_length: 4000,
+///     temperature: 0.3,
+///     retry_attempts: 3,
+///     retry_delay_ms: 1000,
+/// };
+/// ```
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AIConfig {
+    /// AI provider name (e.g. "openai", "claude")
+    pub provider: String,
+    /// API key for authentication
+    pub api_key: Option<String>,
+    /// AI model name to use
+    pub model: String,
+    /// API base URL
+    pub base_url: String,
+    /// Maximum sample length per request
+    pub max_sample_length: usize,
+    /// AI generation creativity parameter (0.0-1.0)
+    pub temperature: f32,
+    /// Number of retries on request failure
+    pub retry_attempts: u32,
+    /// Retry interval in milliseconds
+    pub retry_delay_ms: u64,
+}
+
+/// Subtitle format related configuration
+///
+/// Controls various options for subtitle format conversion and processing, including default output format,
+/// style preservation, and encoding handling settings.
+///
+/// # Examples
+///
+/// ```rust
+/// use subx_cli::config::FormatsConfig;
+///
+/// let config = FormatsConfig {
+///     default_output: "srt".to_string(),
+///     preserve_styling: true,
+///     default_encoding: "utf-8".to_string(),
+///     encoding_detection_confidence: 0.8,
+/// };
+/// ```
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FormatsConfig {
+    /// Default output format (e.g. "srt", "ass", "vtt")
+    pub default_output: String,
+    /// Whether to preserve style information during format conversion
+    pub preserve_styling: bool,
+    /// Default character encoding (e.g. "utf-8", "gbk")
+    pub default_encoding: String,
+    /// Encoding detection confidence threshold (0.0-1.0)
+    pub encoding_detection_confidence: f32,
+}
+
+/// Audio synchronization related configuration
+///
+/// Controls various parameters for audio-subtitle synchronization algorithms, including maximum offset,
+/// correlation threshold, and dialogue detection settings.
+///
+/// # Examples
+///
+/// ```rust
+/// use subx_cli::config::SyncConfig;
+///
+/// let config = SyncConfig {
+///     max_offset_seconds: 30.0,
+///     audio_sample_rate: 44100,
+///     correlation_threshold: 0.8,
+///     dialogue_detection_threshold: 0.6,
+///     min_dialogue_duration_ms: 500,
+///     dialogue_merge_gap_ms: 200,
+///     enable_dialogue_detection: true,
+///     auto_detect_sample_rate: true,
+/// };
+/// ```
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SyncConfig {
+    /// Maximum allowed time offset (seconds)
+    pub max_offset_seconds: f32,
+    /// Audio processing sample rate (Hz)
+    pub audio_sample_rate: u32,
+    /// Correlation analysis threshold (0.0-1.0)
+    pub correlation_threshold: f32,
+    /// Dialogue detection threshold (0.0-1.0)
+    pub dialogue_detection_threshold: f32,
+    /// Minimum dialogue duration (milliseconds)
+    pub min_dialogue_duration_ms: u64,
+    /// Dialogue segment merge gap (milliseconds)
+    pub dialogue_merge_gap_ms: u64,
+    /// Whether to enable dialogue detection
+    pub enable_dialogue_detection: bool,
+    /// Whether to auto-detect original sample rate
+    pub auto_detect_sample_rate: bool,
+}
+
+impl SyncConfig {
+    /// Whether to auto-detect original sample rate
+    pub fn auto_detect_sample_rate(&self) -> bool {
+        self.auto_detect_sample_rate
+    }
+}
+
+/// General configuration
+///
+/// Controls general application behavior options, including backup, parallel processing, and user interface settings.
+///
+/// # Examples
+///
+/// ```rust
+/// use subx_cli::config::GeneralConfig;
+///
+/// let config = GeneralConfig {
+///     backup_enabled: true,
+///     max_concurrent_jobs: 4,
+///     task_timeout_seconds: 300,
+///     enable_progress_bar: true,
+///     worker_idle_timeout_seconds: 60,
+/// };
+/// ```
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GeneralConfig {
+    /// Whether to enable automatic backup
+    pub backup_enabled: bool,
+    /// Maximum number of concurrent jobs
+    pub max_concurrent_jobs: usize,
+    /// Timeout for a single task (seconds)
+    pub task_timeout_seconds: u64,
+    /// Whether to show progress bar
+    pub enable_progress_bar: bool,
+    /// Worker idle timeout (seconds)
+    pub worker_idle_timeout_seconds: u64,
+}
+
+/// Parallel processing related configuration
+///
+/// Controls various parameters for parallel task processing, including queue size, priority management, and load balancing strategy.
+///
+/// # Examples
+///
+/// ```rust
+/// use subx_cli::config::{ParallelConfig, OverflowStrategy};
+///
+/// let config = ParallelConfig {
+///     task_queue_size: 100,
+///     enable_task_priorities: true,
+///     auto_balance_workers: true,
+///     queue_overflow_strategy: OverflowStrategy::Block,
+/// };
+/// ```
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ParallelConfig {
+    /// Maximum size of the task queue
+    pub task_queue_size: usize,
+    /// Whether to enable task priority management
+    pub enable_task_priorities: bool,
+    /// Whether to auto-balance worker load
+    pub auto_balance_workers: bool,
+    /// Strategy to apply when the task queue reaches its maximum size.
+    pub queue_overflow_strategy: OverflowStrategy,
+}
+
+impl Default for ParallelConfig {
+    fn default() -> Self {
+        ParallelConfig {
+            task_queue_size: 100,
+            enable_task_priorities: true,
+            auto_balance_workers: true,
+            queue_overflow_strategy: OverflowStrategy::Block,
+        }
+    }
+}
+
+/// Strategy to apply when the parallel task queue is full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OverflowStrategy {
+    /// Block until space is available.
+    Block,
+    /// Drop the oldest task in the queue.
+    DropOldest,
+    /// Reject new tasks when full.
+    Reject,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            ai: AIConfig {
+                provider: "openai".to_string(),
+                api_key: None,
+                model: "gpt-4o-mini".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                max_sample_length: 2000,
+                temperature: 0.3,
+                retry_attempts: 3,
+                retry_delay_ms: 1000,
+            },
+            formats: FormatsConfig {
+                default_output: "srt".to_string(),
+                preserve_styling: true,
+                default_encoding: "utf-8".to_string(),
+                encoding_detection_confidence: 0.7,
+            },
+            sync: SyncConfig {
+                max_offset_seconds: 30.0,
+                audio_sample_rate: 16000,
+                correlation_threshold: 0.7,
+                dialogue_detection_threshold: 0.01,
+                min_dialogue_duration_ms: 500,
+                dialogue_merge_gap_ms: 500,
+                enable_dialogue_detection: true,
+                auto_detect_sample_rate: true,
+            },
+            general: GeneralConfig {
+                backup_enabled: false,
+                max_concurrent_jobs: 4,
+                task_timeout_seconds: 3600,
+                enable_progress_bar: true,
+                worker_idle_timeout_seconds: 300,
+            },
+            parallel: ParallelConfig::default(),
+            loaded_from: None,
+        }
+    }
+}
+
+impl Config {
+    /// Save configuration to file
+    pub fn save(&self) -> Result<()> {
+        let path = Config::config_file_path()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let toml = toml::to_string_pretty(self)
+            .map_err(|e| SubXError::config(format!("TOML serialization error: {}", e)))?;
+        std::fs::write(path, toml)?;
+        Ok(())
+    }
+
+    /// Get configuration file path
+    pub fn config_file_path() -> Result<PathBuf> {
+        debug!("config_file_path: Checking SUBX_CONFIG_PATH environment variable");
+        if let Ok(custom) = std::env::var("SUBX_CONFIG_PATH") {
+            debug!("config_file_path: Using custom path from env: {}", custom);
+            let path = PathBuf::from(custom);
+            debug!("config_file_path: Custom path exists: {}", path.exists());
+            return Ok(path);
+        }
+        debug!("config_file_path: SUBX_CONFIG_PATH not set, using default");
+        let dir = dirs::config_dir()
+            .ok_or_else(|| SubXError::config("Unable to determine config directory"))?;
+        let default_path = dir.join("subx").join("config.toml");
+        debug!("config_file_path: Default path: {:?}", default_path);
+        Ok(default_path)
+    }
+
+    #[allow(dead_code)]
+    fn apply_env_vars(&mut self) {
+        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            self.ai.api_key = Some(key);
+        }
+        if let Ok(model) = std::env::var("SUBX_AI_MODEL") {
+            self.ai.model = model;
+        }
+    }
+
+    #[allow(dead_code)]
+    fn validate(&self) -> Result<()> {
+        if self.ai.provider != "openai" {
+            return Err(SubXError::config(format!(
+                "Unsupported AI provider: {}",
+                self.ai.provider
+            )));
+        }
+        Ok(())
+    }
+
+    /// Get value by key (simple version)
+    pub fn get_value(&self, key: &str) -> Result<String> {
+        let parts: Vec<&str> = key.splitn(2, '.').collect();
+        if parts.len() != 2 {
+            return Err(SubXError::config(format!(
+                "Invalid config key format: {}",
+                key
+            )));
+        }
+        match parts[0] {
+            "ai" => match parts[1] {
+                "provider" => Ok(self.ai.provider.clone()),
+                "api_key" => Ok(self.ai.api_key.clone().unwrap_or_default()),
+                "model" => Ok(self.ai.model.clone()),
+                "base_url" => Ok(self.ai.base_url.clone()),
+                _ => Err(SubXError::config(format!("Invalid AI config key: {}", key))),
+            },
+            "formats" => match parts[1] {
+                "default_output" => Ok(self.formats.default_output.clone()),
+                _ => Err(SubXError::config(format!(
+                    "Invalid Formats config key: {}",
+                    key
+                ))),
+            },
+            _ => Err(SubXError::config(format!(
+                "Invalid config section: {}",
+                parts[0]
+            ))),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn merge(&mut self, other: Config) {
+        *self = other;
+    }
+}
+
+// ============================================================================
+// 新配置系統 (使用 config crate)
+// ============================================================================
+
+/// 使用 config crate 建立配置實例
+///
+/// 這個函式使用社區標準的 config crate 來載入配置，替代舊的全域配置管理器。
+/// 支援多層次配置來源：預設值 → 配置檔案 → 環境變數。
+///
+/// # 配置來源優先級
+/// 1. 環境變數 (前綴: SUBX_) - 最高優先級
+/// 2. 用戶配置檔案
+/// 3. 預設配置值 - 最低優先級
+///
+/// # 錯誤
+/// 當配置載入或解析失敗時返回 `SubXError::Config`
+#[allow(dead_code)]
+pub fn create_config_from_sources() -> Result<Config> {
+    let config_path = Config::config_file_path()?;
+    debug!(
+        "create_config_from_sources: Using config path: {:?}",
+        config_path
+    );
+    debug!(
+        "create_config_from_sources: Config path exists: {}",
+        config_path.exists()
+    );
+
+    let mut settings = ConfigBuilder::builder();
+
+    // 1. 首先設定預設值
+    let default_config = Config::default();
+    settings = settings
+        .set_default("ai.provider", default_config.ai.provider.clone())?
+        .set_default("ai.model", default_config.ai.model.clone())?
+        .set_default("ai.base_url", default_config.ai.base_url.clone())?
+        .set_default(
+            "ai.max_sample_length",
+            default_config.ai.max_sample_length as i64,
+        )?
+        .set_default("ai.temperature", default_config.ai.temperature as f64)?
+        .set_default("ai.retry_attempts", default_config.ai.retry_attempts as i64)?
+        .set_default("ai.retry_delay_ms", default_config.ai.retry_delay_ms as i64)?
+        .set_default(
+            "formats.default_output",
+            default_config.formats.default_output.clone(),
+        )?
+        .set_default(
+            "formats.preserve_styling",
+            default_config.formats.preserve_styling,
+        )?
+        .set_default(
+            "formats.default_encoding",
+            default_config.formats.default_encoding.clone(),
+        )?
+        .set_default(
+            "formats.encoding_detection_confidence",
+            default_config.formats.encoding_detection_confidence as f64,
+        )?
+        .set_default(
+            "sync.max_offset_seconds",
+            default_config.sync.max_offset_seconds as f64,
+        )?
+        .set_default(
+            "sync.audio_sample_rate",
+            default_config.sync.audio_sample_rate as i64,
+        )?
+        .set_default(
+            "sync.correlation_threshold",
+            default_config.sync.correlation_threshold as f64,
+        )?
+        .set_default(
+            "sync.dialogue_detection_threshold",
+            default_config.sync.dialogue_detection_threshold as f64,
+        )?
+        .set_default(
+            "sync.min_dialogue_duration_ms",
+            default_config.sync.min_dialogue_duration_ms as i64,
+        )?
+        .set_default(
+            "sync.dialogue_merge_gap_ms",
+            default_config.sync.dialogue_merge_gap_ms as i64,
+        )?
+        .set_default(
+            "sync.enable_dialogue_detection",
+            default_config.sync.enable_dialogue_detection,
+        )?
+        .set_default(
+            "sync.auto_detect_sample_rate",
+            default_config.sync.auto_detect_sample_rate,
+        )?
+        .set_default(
+            "general.backup_enabled",
+            default_config.general.backup_enabled,
+        )?
+        .set_default(
+            "general.max_concurrent_jobs",
+            default_config.general.max_concurrent_jobs as i64,
+        )?
+        .set_default(
+            "general.task_timeout_seconds",
+            default_config.general.task_timeout_seconds as i64,
+        )?
+        .set_default(
+            "general.enable_progress_bar",
+            default_config.general.enable_progress_bar,
+        )?
+        .set_default(
+            "general.worker_idle_timeout_seconds",
+            default_config.general.worker_idle_timeout_seconds as i64,
+        )?
+        .set_default(
+            "parallel.task_queue_size",
+            default_config.parallel.task_queue_size as i64,
+        )?
+        .set_default(
+            "parallel.enable_task_priorities",
+            default_config.parallel.enable_task_priorities,
+        )?
+        .set_default(
+            "parallel.auto_balance_workers",
+            default_config.parallel.auto_balance_workers,
+        )?
+        .set_default("parallel.queue_overflow_strategy", "block")?;
+
+    // 2. 用戶配置檔案
+    settings = settings.add_source(File::from(config_path).required(false));
+
+    // 3. 環境變數 (前綴: SUBX_)
+    settings = settings.add_source(Environment::with_prefix("SUBX").separator("_"));
+
+    let config = settings.build().map_err(|e| {
+        debug!("create_config_from_sources: Config build failed: {}", e);
+        SubXError::config(format!("Configuration build error: {}", e))
+    })?;
+
+    // 先獲取 queue_overflow_strategy 的字串值
+    let queue_overflow_strategy = config
+        .get_string("parallel.queue_overflow_strategy")
+        .unwrap_or_else(|_| "block".to_string());
+
+    // 嘗試反序列化
+    let mut final_config: Config = config.try_deserialize().map_err(|e| {
+        debug!("create_config_from_sources: Deserialization failed: {}", e);
+        SubXError::config(format!("Configuration deserialization error: {}", e))
+    })?;
+
+    // 處理 queue_overflow_strategy enum（如果 serde 反序列化失敗，手動設定）
+    final_config.parallel.queue_overflow_strategy = match queue_overflow_strategy.as_str() {
+        "block" => OverflowStrategy::Block,
+        "dropoldest" => OverflowStrategy::DropOldest,
+        "reject" => OverflowStrategy::Reject,
+        _ => OverflowStrategy::Block, // 預設值
+    };
+
+    // loaded_from 設為 None（因為可能來自多個來源）
+    final_config.loaded_from = None;
+
+    debug!("create_config_from_sources: Configuration loaded successfully");
+    Ok(final_config)
+}
+
+/// 建立帶有動態覆蓋的配置實例
+///
+/// 這個函式允許在運行時動態添加配置覆蓋，主要用於 CLI 參數整合。
+/// 覆蓋值具有最高優先級，會覆蓋所有其他配置來源。
+///
+/// # 參數
+/// * `overrides` - 鍵值對列表，用於覆蓋配置值
+///
+/// # 錯誤
+/// 當配置載入或解析失敗時返回 `SubXError::Config`
+#[allow(dead_code)]
+pub fn create_config_with_overrides(overrides: Vec<(String, String)>) -> Result<Config> {
+    let config_path = Config::config_file_path()?;
+    debug!(
+        "create_config_with_overrides: Using config path: {:?}",
+        config_path
+    );
+
+    let mut settings = ConfigBuilder::builder();
+
+    // 1. 首先設定預設值（與 create_config_from_sources 相同）
+    let default_config = Config::default();
+    settings = settings
+        .set_default("ai.provider", default_config.ai.provider.clone())?
+        .set_default("ai.model", default_config.ai.model.clone())?
+        .set_default("ai.base_url", default_config.ai.base_url.clone())?
+        .set_default(
+            "ai.max_sample_length",
+            default_config.ai.max_sample_length as i64,
+        )?
+        .set_default("ai.temperature", default_config.ai.temperature as f64)?
+        .set_default("ai.retry_attempts", default_config.ai.retry_attempts as i64)?
+        .set_default("ai.retry_delay_ms", default_config.ai.retry_delay_ms as i64)?
+        .set_default(
+            "formats.default_output",
+            default_config.formats.default_output.clone(),
+        )?
+        .set_default(
+            "formats.preserve_styling",
+            default_config.formats.preserve_styling,
+        )?
+        .set_default(
+            "formats.default_encoding",
+            default_config.formats.default_encoding.clone(),
+        )?
+        .set_default(
+            "formats.encoding_detection_confidence",
+            default_config.formats.encoding_detection_confidence as f64,
+        )?
+        .set_default(
+            "sync.max_offset_seconds",
+            default_config.sync.max_offset_seconds as f64,
+        )?
+        .set_default(
+            "sync.audio_sample_rate",
+            default_config.sync.audio_sample_rate as i64,
+        )?
+        .set_default(
+            "sync.correlation_threshold",
+            default_config.sync.correlation_threshold as f64,
+        )?
+        .set_default(
+            "sync.dialogue_detection_threshold",
+            default_config.sync.dialogue_detection_threshold as f64,
+        )?
+        .set_default(
+            "sync.min_dialogue_duration_ms",
+            default_config.sync.min_dialogue_duration_ms as i64,
+        )?
+        .set_default(
+            "sync.dialogue_merge_gap_ms",
+            default_config.sync.dialogue_merge_gap_ms as i64,
+        )?
+        .set_default(
+            "sync.enable_dialogue_detection",
+            default_config.sync.enable_dialogue_detection,
+        )?
+        .set_default(
+            "sync.auto_detect_sample_rate",
+            default_config.sync.auto_detect_sample_rate,
+        )?
+        .set_default(
+            "general.backup_enabled",
+            default_config.general.backup_enabled,
+        )?
+        .set_default(
+            "general.max_concurrent_jobs",
+            default_config.general.max_concurrent_jobs as i64,
+        )?
+        .set_default(
+            "general.task_timeout_seconds",
+            default_config.general.task_timeout_seconds as i64,
+        )?
+        .set_default(
+            "general.enable_progress_bar",
+            default_config.general.enable_progress_bar,
+        )?
+        .set_default(
+            "general.worker_idle_timeout_seconds",
+            default_config.general.worker_idle_timeout_seconds as i64,
+        )?
+        .set_default(
+            "parallel.task_queue_size",
+            default_config.parallel.task_queue_size as i64,
+        )?
+        .set_default(
+            "parallel.enable_task_priorities",
+            default_config.parallel.enable_task_priorities,
+        )?
+        .set_default(
+            "parallel.auto_balance_workers",
+            default_config.parallel.auto_balance_workers,
+        )?
+        .set_default("parallel.queue_overflow_strategy", "block")?;
+
+    // 2. 用戶配置檔案
+    settings = settings.add_source(File::from(config_path).required(false));
+
+    // 3. 環境變數 (前綴: SUBX_)
+    settings = settings.add_source(Environment::with_prefix("SUBX").separator("_"));
+
+    // 4. 動態添加覆蓋 (CLI 參數等，最高優先級)
+    for (key, value) in overrides {
+        debug!(
+            "create_config_with_overrides: Setting override {}={}",
+            key, value
+        );
+        settings = settings
+            .set_override(key, value)
+            .map_err(|e| SubXError::config(format!("Override setting error: {}", e)))?;
+    }
+
+    let config = settings.build().map_err(|e| {
+        debug!("create_config_with_overrides: Config build failed: {}", e);
+        SubXError::config(format!("Configuration build error: {}", e))
+    })?;
+
+    // 先獲取 queue_overflow_strategy 的字串值
+    let queue_overflow_strategy = config
+        .get_string("parallel.queue_overflow_strategy")
+        .unwrap_or_else(|_| "block".to_string());
+
+    // 嘗試反序列化
+    let mut final_config: Config = config.try_deserialize().map_err(|e| {
+        debug!(
+            "create_config_with_overrides: Deserialization failed: {}",
+            e
+        );
+        SubXError::config(format!("Configuration deserialization error: {}", e))
+    })?;
+
+    // 處理 queue_overflow_strategy enum（如果 serde 反序列化失敗，手動設定）
+    final_config.parallel.queue_overflow_strategy = match queue_overflow_strategy.as_str() {
+        "block" => OverflowStrategy::Block,
+        "dropoldest" => OverflowStrategy::DropOldest,
+        "reject" => OverflowStrategy::Reject,
+        _ => OverflowStrategy::Block, // 預設值
+    };
+
+    // loaded_from 設為 None（因為可能來自多個來源）
+    final_config.loaded_from = None;
+
+    debug!("create_config_with_overrides: Configuration with overrides loaded successfully");
+    Ok(final_config)
+}
+
+/// 建立測試專用配置實例
+///
+/// 為測試環境提供快速的配置建立，無需檔案系統或環境變數。
+/// 從預設配置開始，然後應用指定的覆蓋值。
+///
+/// # 參數
+/// * `overrides` - 鍵值對列表，用於覆蓋預設配置值
+#[allow(dead_code)]
+pub fn create_test_config(overrides: Vec<(&str, &str)>) -> Config {
+    let mut config = Config::default();
+
+    // 應用測試特定的覆蓋值
+    for (key, value) in overrides {
+        match key {
+            "ai.provider" => config.ai.provider = value.to_string(),
+            "ai.model" => config.ai.model = value.to_string(),
+            "ai.api_key" => config.ai.api_key = Some(value.to_string()),
+            "sync.correlation_threshold" => {
+                if let Ok(val) = value.parse::<f32>() {
+                    config.sync.correlation_threshold = val;
+                }
+            }
+            "sync.max_offset_seconds" => {
+                if let Ok(val) = value.parse::<f32>() {
+                    config.sync.max_offset_seconds = val;
+                }
+            }
+            "formats.default_output" => config.formats.default_output = value.to_string(),
+            "general.backup_enabled" => {
+                if let Ok(val) = value.parse::<bool>() {
+                    config.general.backup_enabled = val;
+                }
+            }
+            _ => {
+                debug!("create_test_config: Unknown override key: {}", key);
+            }
+        }
+    }
+
+    config
+}
+
+// =============================
+// 向後相容性函式 (Backward Compatibility)
+// =============================
+
+/// 初始化配置管理器的新版本（向後相容性）
+///
+/// 這個函式提供與舊版 `init_config_manager()` 相同的介面，
+/// 但內部使用新的 config crate 機制。
+///
+/// # 棄用通知
+///
+/// 此函式已被棄用，請使用 `create_config_from_sources()` 代替。
+#[deprecated(note = "Use create_config_from_sources() instead")]
+#[allow(dead_code)]
+pub fn init_config_manager_new() -> Result<()> {
+    log::warn!("init_config_manager_new is deprecated, use create_config_from_sources instead");
+    // 新版本不需要全域初始化，僅驗證配置可以載入
+    create_config_from_sources().map(|_| ())
+}
+
+/// 載入配置的新版本（向後相容性）
+///
+/// 這個函式提供與舊版 `load_config()` 相同的介面，
+/// 但內部使用新的 config crate 機制。
+///
+/// # 棄用通知
+///
+/// 此函式已被棄用，請使用 `create_config_from_sources()` 代替。
+#[deprecated(note = "Use create_config_from_sources() instead")]
+#[allow(dead_code)]
+pub fn load_config_new() -> Result<Config> {
+    log::warn!("load_config_new is deprecated, use create_config_from_sources instead");
+    create_config_from_sources()
+}
