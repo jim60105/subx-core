@@ -156,6 +156,9 @@ hound = { version = "3.5", optional = true }
 # covers. The declaration carries no `version` key, so `cargo package` strips
 # it from the published manifest and no consumer ever sees it.
 [dev-dependencies]
+# vad_detector_tests drives a multi_thread flavor under slow-tests; dev-dep
+# features unify only into test builds, so the library target stays rt-only.
+tokio = { version = "1.0", features = ["rt-multi-thread"] }
 mockall = "0.13"
 wiremock = "0.6"
 hound = "3.5"

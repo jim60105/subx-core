@@ -2,6 +2,24 @@
 
 Instructions for AI coding agents working on **subx-core**.
 
+## Test-suite split (mirrored rules)
+
+- **Which crate does a test belong to?** It spawns the CLI binary or names
+  `subx_cli::cli` / `subx_cli::commands` / `subx_cli::App` → it lives in the
+  `subx-cli` repository. It names only library segments → `subx-core/tests/`.
+- **`test-support` feature:** shared fixtures live in
+  `subx_core::test_support`, gated by the `test-support` feature. This crate's
+  own tests reach it through a path-only self dev-dependency; `subx-cli`
+  enables it through its `[dev-dependencies]`. Never pass `--features
+  test-support` on the command line, and never add the feature to a shipping
+  default — `cargo build --release` must not compile the module.
+- **`subx-core/tests/` is flat** (Cargo auto-discovers `tests/*.rs` only), so
+  it has no `#[path]` shims; shared code comes from `test_support`, not a
+  `tests/common/`.
+- **Fixture and asset reads resolve from `env!("CARGO_MANIFEST_DIR")`**, never
+  the working directory — the parser fixtures (`tests/fixtures/formats/`) and
+  the media assets (`assets/`) ship in this repository.
+
 ## Project Overview
 
 `subx-core` is the core subtitle processing library of the SubX project,
