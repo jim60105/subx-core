@@ -110,6 +110,20 @@ pub mod core;
 pub mod error;
 pub mod services;
 
+/// Shared test fixtures for the SubX integration suites.
+///
+/// Compiled only with the `test-support` feature, which no shipping build
+/// activates — `subx-cli` turns it on through a `[dev-dependencies]`
+/// declaration of this crate, and this crate's own integration tests reach
+/// it through a path-only self dev-dependency, so neither mechanism can
+/// leak into a release artifact. The missing-documentation lint is relaxed
+/// on this declaration because the module's items are test scaffolding
+/// documented by their surrounding prose rather than rustdoc; the
+/// `broken_intra_doc_links = "deny"` lint still applies inside it.
+#[cfg(feature = "test-support")]
+#[allow(missing_docs)]
+pub mod test_support;
+
 pub use config::Config;
 // Re-export the configuration service system at the crate root.
 pub use config::{

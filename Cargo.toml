@@ -32,11 +32,15 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 # 'slow-tests' gates long-running format round-trip tests;
-# 'archive-rar' enables optional RAR archive extraction via `dep:unrar`.
+# 'archive-rar' enables optional RAR archive extraction via `dep:unrar`;
+# 'test-support' exposes `src/test_support/` (shared test fixtures for the
+# subx-cli test suite) and pulls in the HTTP mock server and WAV writer that
+# only that module needs.
 [features]
 default = []
 slow-tests = []
 archive-rar = ["dep:unrar"]
+test-support = ["dep:wiremock", "dep:hound"]
 
 # Documentation quality linting
 [lints.rustdoc]
@@ -133,9 +137,36 @@ flate2 = "1"
 tempfile = "3.10"
 sevenz-rust2 = "0.22.2"
 
-# Used by the #[cfg(test)] modules inside src/** only (mockall: 2 sites,
-# wiremock: 6 sites in src/services/ai). The remaining test crates arrive
-# with B3, when tests/ and benches/ move and give them use sites.
+# Activated only by `test-support` (see [features] and the [dev-dependencies]
+# note below); a build without the feature never resolves them.
+wiremock = { version = "0.6", optional = true }
+hound = { version = "3.5", optional = true }
+
+# Test-only dependencies.
+#
+# `wiremock` and `hound` appear twice by design: `optional = true` under
+# [dependencies] so the `test-support` feature can activate them for
+# `src/test_support/`, and again under [dev-dependencies] so this crate's own
+# integration tests can name them directly. That is the ordinary Cargo shape
+# for a dependency used both behind a feature and by tests, not a duplication.
+#
+# `subx-core = { path = "." }` under [dev-dependencies] is how this crate's
+# integration tests reach the `test-support`-gated module: an integration
+# test links the library as an external crate, which `#[cfg(test)]` never
+# covers. The declaration carries no `version` key, so `cargo package` strips
+# it from the published manifest and no consumer ever sees it.
 [dev-dependencies]
 mockall = "0.13"
 wiremock = "0.6"
+hound = "3.5"
+criterion = { version = "0.6.0", features = ["html_reports"] }
+pretty_assertions = "1.4"
+subx-core = { path = ".", features = ["test-support"] }
+
+[[bench]]
+name = "retry_performance"
+harness = false
+
+[[bench]]
+name = "file_id_generation_bench"
+harness = false
