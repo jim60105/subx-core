@@ -45,14 +45,34 @@ This repository is normally consumed in one of two ways:
    [`jim60105/subx`](https://github.com/jim60105/subx) and every crates.io
    consumer depend on.
 
-## Current Status
+## Module Map
 
-At this commit the crate is a **placeholder skeleton**: its entire public
-surface is [`VERSION`](src/lib.rs). The processing engines that will populate
-it currently live in `subx-cli/src/core/`, `subx-cli/src/services/`,
-`subx-cli/src/config/`, and `subx-cli/src/error.rs`, and arrive here with the
-source-migration changes of the two-crate split. Until then, do not add
-application logic here ahead of that migration.
+The library sources migrated from `subx-cli` at their identical relative paths:
+
+| Module | Contents |
+|---|---|
+| `src/config/` | Configuration system: `Config`, the `ConfigService` DI trait, production/test services, validation |
+| `src/core/` | Processing engines: `formats` (SRT/ASS/VTT/SUB + encoding), `matcher`, `sync`, `translation`, `parallel`, `archive`, `input`, `report`, `lock`, `file_manager`, `factory` |
+| `src/error.rs` | `SubXError` and the machine-readable error contract (`category`, `machine_code`, `hint`) |
+| `src/services/` | External integrations: AI providers (`services::ai`), audio processing, VAD |
+
+Public paths are deliberately identical to the pre-split `subx_cli::` paths
+with only the crate name swapped — including the redundant `core::` segment
+(`subx_core::core::matcher::MatchEngine`). The rationale is recorded in the
+crate-level rustdoc in [`src/lib.rs`](src/lib.rs).
+
+### Feature flags
+
+- `archive-rar` — enables RAR extraction via the optional `unrar` dependency
+- `slow-tests` — compiles the long-running format round-trip tests
+
+### Git history note
+
+This branch carries **two roots**. The B1 skeleton commits are one; the other
+is the history of these sources inside `subx-cli`, extracted with
+`git filter-repo` restricted to the four migrated paths and merged with
+`--allow-unrelated-histories` so `git log`/`git blame` keep working across the
+repository boundary. It reads oddly in `git log --graph`; it is intentional.
 
 ## Building
 

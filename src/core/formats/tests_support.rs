@@ -60,15 +60,45 @@ impl Rng {
 ///
 /// `rel_path` is interpreted relative to the `tests/fixtures/formats/`
 /// directory, e.g. `"srt/basic.srt"`.
+///
+/// The fixture tree still lives in the `subx-cli` repository (`tests/`
+/// migrates in the next change of the two-crate split, B3), so a build
+/// inside the `subx-cli` workspace resolves the path through this crate's
+/// parent manifest directory. Outside that workspace — a standalone clone of
+/// this repository — the fixtures do not exist and cannot: the mutation
+/// harness skips (prints and returns) rather than failing, and B3 restores
+/// unconditional coverage by moving the fixtures beside the code that reads
+/// them.
 pub(crate) fn read_fixture(rel_path: &str) -> Vec<u8> {
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR must be set when running cargo tests");
-    let mut p = PathBuf::from(manifest);
-    p.push("tests");
-    p.push("fixtures");
-    p.push("formats");
-    p.push(rel_path);
-    std::fs::read(&p).unwrap_or_else(|e| panic!("failed to read fixture {}: {}", p.display(), e))
+    let mut candidate = PathBuf::from(&manifest);
+    candidate.push("tests");
+    candidate.push("fixtures");
+    candidate.push("formats");
+    candidate.push(rel_path);
+    if !candidate.is_file() {
+        // Inside the subx-cli workspace the fixtures sit one level up.
+        let mut parent = PathBuf::from(manifest);
+        parent.push("..");
+        parent.push("tests");
+        parent.push("fixtures");
+        parent.push("formats");
+        parent.push(rel_path);
+        if parent.is_file() {
+            candidate = parent;
+        } else {
+            eprintln!(
+                "SKIPPING mutation harness: fixture {} is not present \
+                 (the tests/fixtures tree still lives in the subx-cli \
+                 repository until B3)",
+                rel_path
+            );
+            return Vec::new();
+        }
+    }
+    std::fs::read(&candidate)
+        .unwrap_or_else(|e| panic!("failed to read fixture {}: {}", candidate.display(), e))
 }
 
 /// Flip a single random byte in `bytes` by XOR-ing it with a random mask.

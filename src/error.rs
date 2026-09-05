@@ -517,6 +517,75 @@ mod tests {
         let result: SubXResult<i32> = Err(SubXError::NoInputSpecified);
         assert!(result.is_err());
     }
+
+    /// Audit (core half): enumerates every `SubXError` variant and asserts
+    /// that a representative instance — built from non-sensitive dummy data —
+    /// never surfaces an OpenAI-style API key prefix (`sk-`) through
+    /// `Display` or `Debug`. If you add a new variant, extend this list so
+    /// the audit remains exhaustive.
+    ///
+    /// The `user_friendly_message` surface of the same audit lives in the
+    /// `subx-cli` repository's `src/cli/error_ext.rs`
+    /// (`test_no_api_key_leaks_in_any_variant`), beside the exit-code and
+    /// friendly-message assertions that are binary presentation and cannot
+    /// live here. Keep the two variant lists in step — updating one without
+    /// the other half-defeats the `secrets-protection` variant audit.
+    #[test]
+    fn test_no_api_key_leaks_in_any_variant() {
+        use std::path::PathBuf;
+
+        let variants: Vec<SubXError> = vec![
+            SubXError::Io(io::Error::other("disk error")),
+            SubXError::Config {
+                message: "missing key".to_string(),
+            },
+            SubXError::SubtitleFormat {
+                format: "SRT".to_string(),
+                message: "bad timestamp".to_string(),
+            },
+            SubXError::AiService("upstream service failed".to_string()),
+            SubXError::Api {
+                message: "auth failed".to_string(),
+                source: ApiErrorSource::OpenAI,
+            },
+            SubXError::AudioProcessing {
+                message: "codec failure".to_string(),
+            },
+            SubXError::FileMatching {
+                message: "pattern mismatch".to_string(),
+            },
+            SubXError::FileAlreadyExists("/tmp/example".to_string()),
+            SubXError::FileNotFound("/tmp/example".to_string()),
+            SubXError::InvalidFileName("bad?name".to_string()),
+            SubXError::FileOperationFailed("rename failed".to_string()),
+            SubXError::CommandExecution("exit 1".to_string()),
+            SubXError::NoInputSpecified,
+            SubXError::InvalidPath(PathBuf::from("/tmp/example")),
+            SubXError::PathNotFound(PathBuf::from("/tmp/example")),
+            SubXError::DirectoryReadError {
+                path: PathBuf::from("/tmp/example"),
+                source: io::Error::other("denied"),
+            },
+            SubXError::InvalidSyncConfiguration,
+            SubXError::UnsupportedFileType("xyz".to_string()),
+            SubXError::OutputModeUnsupported {
+                command: "generate-completion".to_string(),
+            },
+            SubXError::Other(anyhow::anyhow!("wrapped")),
+        ];
+
+        for err in &variants {
+            let display = format!("{err}");
+            let debug = format!("{err:?}");
+            for (label, text) in [("Display", &display), ("Debug", &debug)] {
+                assert!(
+                    !text.contains("sk-"),
+                    "{} surface for variant {err:?} contains `sk-` prefix: {text}",
+                    label,
+                );
+            }
+        }
+    }
 }
 
 // Convert reqwest error to AI service error

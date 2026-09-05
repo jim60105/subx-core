@@ -51,8 +51,39 @@ modes working:
   tree following the pointer on `git pull`/`git checkout` (per-clone setting;
   does not apply to `git clone`).
 
-At the current commit the crate is a placeholder skeleton whose contents
-arrive with the source migration of the two-crate split.
+## Module Guide
+
+The library sources migrated from `subx-cli` at their identical relative
+paths:
+
+| Path | Owns |
+|---|---|
+| `src/config/` | The configuration system: `Config`, the `ConfigService` DI trait, `ProductionConfigService`, the `Test*` utilities, `field_validator`, `validator`, and the twelve `#[macro_export]` test macros (`test_macros.rs`, reachable at the crate root) |
+| `src/core/` | The processing engines: `formats` (SRT/ASS/VTT/SUB + `encoding`), `matcher`, `sync`, `translation`, `parallel`, `archive`, `input`, `report` (the `Reporter` seam), `lock`, `file_manager`, `factory`, `language`, `uuidv7`, `fs_util` |
+| `src/error.rs` | `SubXError`, its helper constructors and `From` conversions, and the machine-readable contract (`category`, `machine_code`, `hint`) |
+| `src/services/` | External integrations: `ai` (providers, retry, security, error sanitizer), `audio`, `vad` |
+
+Public module paths are frozen at their pre-split `subx_cli::` shapes (only
+the crate name differs) — see the crate-level rustdoc in `src/lib.rs` before
+reshaping anything.
+
+## Dependency Direction — A One-Way Boundary
+
+**No file under `src/` may name `subx_cli`, `crate::cli` or `crate::commands`
+anywhere in a line — not in code, not in an intra-doc link, not in a
+doctest.** The dependency between the two repositories points downward only
+(`subx-cli` depends on `subx-core`); there is no dependency edge in the other
+direction and there never will be, so an upward reference is *unfixable*
+rather than merely stale — and under `broken_intra_doc_links = "deny"` an
+upward doc link is a hard build failure with no repair short of deleting it.
+
+Enforcement: the `core_cli_boundary` guard test in the `subx-cli` repository
+(`subx-cli/tests/core_cli_boundary.rs`) walks this crate's `src/` from
+`CARGO_MANIFEST_DIR` and fails on any line containing those tokens, comments
+included. Human-oriented output from core goes through the
+`subx_core::core::report::Reporter` seam; the CLI renders it. Plain rustdoc
+prose may mention the `subx-cli` binary by name (never as a link) where a
+documented behaviour is written for that binary's terminal.
 
 ## Build, Test, and Quality Commands
 
