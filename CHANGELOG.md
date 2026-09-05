@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The `subx-cli` back-compatibility re-exports (`subx_cli::config`/`core`/`error`/`services`/`Result` and the twelve test macros) survive this change and now have zero in-repository consumers; their removal is a future major-version deletion, not a rewrite. Twelve never-compiled test files, the runtime binary-name lookups, and the per-crate coverage floors are handed to `harden-split-test-suite` (B4).
+
 ### Added
+- `src/test_support/` behind the `test-support` feature (workspace builder, file managers, mock OpenAI / Azure OpenAI helpers, response generators), shared with `subx-cli`'s test suite through a dev-dependency feature so no release artifact sees it. Own `tests/` (40 core-bound integration tests relocated from `subx-cli`), `benches/` with their `[[bench]]` tables, `tests/fixtures/formats/` (22 byte-identical parser fixtures), and `assets/` media (mp4/mp3 move, srt copy).
 
 - The crate now contains the configuration (`config/`), core-engine (`core/`),
   error (`error.rs`) and services (`services/`) modules, migrated from
