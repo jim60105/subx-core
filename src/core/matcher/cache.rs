@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use subx_cli::core::matcher::cache::{CacheData, SnapshotItem, OpItem};
+//! use subx_core::core::matcher::cache::{CacheData, SnapshotItem, OpItem};
 //! // Load existing cache or initialize a new one
 //! ```
 

@@ -43,9 +43,9 @@
 //!
 //! ## Basic Content Analysis
 //! ```rust,ignore
-//! use subx_cli::core::ComponentFactory;
-//! use subx_cli::config::ProductionConfigService;
-//! use subx_cli::Result;
+//! use subx_core::core::ComponentFactory;
+//! use subx_core::config::ProductionConfigService;
+//! use subx_core::Result;
 //! use std::sync::Arc;
 //!
 //! async fn analyze_content() -> Result<()> {
@@ -62,7 +62,7 @@
 //!
 //! ## Match Verification Workflow
 //! ```rust,ignore
-//! use subx_cli::services::ai::{AIProvider, VerificationRequest};
+//! use subx_core::services::ai::{AIProvider, VerificationRequest};
 //!
 //! async fn verify_matches(ai_client: Box<dyn AIProvider>) -> Result<()> {
 //!     let verification = VerificationRequest {
@@ -88,8 +88,8 @@
 //!
 //! ## Advanced Provider Configuration
 //! ```rust,ignore
-//! use subx_cli::core::ComponentFactory;
-//! use subx_cli::config::ProductionConfigService;
+//! use subx_core::core::ComponentFactory;
+//! use subx_core::config::ProductionConfigService;
 //! use std::sync::Arc;
 //!
 //! async fn configure_ai_services() -> Result<()> {

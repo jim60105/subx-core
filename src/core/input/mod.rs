@@ -58,7 +58,7 @@ use crate::error::SubXError;
 /// ## Basic Usage
 ///
 /// ```rust
-/// use subx_cli::core::input::InputPathHandler;
+/// use subx_core::core::input::InputPathHandler;
 /// use std::path::PathBuf;
 /// # use tempfile::TempDir;
 /// # use std::fs;
@@ -78,13 +78,13 @@ use crate::error::SubXError;
 /// // Collect all matching files
 /// let files = handler.collect_files()?;
 /// assert_eq!(files.len(), 2);
-/// # Ok::<(), subx_cli::error::SubXError>(())
+/// # Ok::<(), subx_core::error::SubXError>(())
 /// ```
 ///
 /// ## Directory Processing
 ///
 /// ```rust
-/// use subx_cli::core::input::InputPathHandler;
+/// use subx_core::core::input::InputPathHandler;
 /// use std::path::PathBuf;
 /// # use tempfile::TempDir;
 /// # use std::fs;
@@ -109,7 +109,7 @@ use crate::error::SubXError;
 ///     .with_extensions(&["srt"]);
 /// let files_recursive = handler_recursive.collect_files()?;
 /// assert_eq!(files_recursive.len(), 2); // Finds both file1 and file2
-/// # Ok::<(), subx_cli::error::SubXError>(())
+/// # Ok::<(), subx_core::error::SubXError>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct InputPathHandler {
@@ -142,7 +142,7 @@ impl InputPathHandler {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::core::input::InputPathHandler;
+    /// use subx_core::core::input::InputPathHandler;
     /// use std::path::PathBuf;
     ///
     /// // Merge paths from different sources
@@ -158,7 +158,7 @@ impl InputPathHandler {
     ///
     /// // merged now contains all paths
     /// assert_eq!(merged.len(), 5);
-    /// # Ok::<(), subx_cli::error::SubXError>(())
+    /// # Ok::<(), subx_core::error::SubXError>(())
     /// ```
     pub fn merge_paths_from_multiple_sources(
         optional_paths: &[Option<PathBuf>],
@@ -239,7 +239,7 @@ impl InputPathHandler {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::core::input::InputPathHandler;
+    /// use subx_core::core::input::InputPathHandler;
     /// use std::path::PathBuf;
     /// # use tempfile::TempDir;
     /// # use std::fs;
@@ -256,7 +256,7 @@ impl InputPathHandler {
     /// // Should contain test_dir (after deduplication)
     /// assert_eq!(directories.len(), 1);
     /// assert_eq!(directories[0], test_dir);
-    /// # Ok::<(), subx_cli::error::SubXError>(())
+    /// # Ok::<(), subx_core::error::SubXError>(())
     /// ```
     pub fn get_directories(&self) -> Vec<PathBuf> {
         let mut directories = std::collections::HashSet::new();

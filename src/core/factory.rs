@@ -24,11 +24,11 @@ use crate::{
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::core::ComponentFactory;
-/// use subx_cli::config::ProductionConfigService;
+/// use subx_core::core::ComponentFactory;
+/// use subx_core::config::ProductionConfigService;
 /// use std::sync::Arc;
 ///
-/// # async fn example() -> subx_cli::Result<()> {
+/// # async fn example() -> subx_core::Result<()> {
 /// let config_service = Arc::new(ProductionConfigService::new()?);
 /// let factory = ComponentFactory::new(config_service.as_ref())?;
 ///

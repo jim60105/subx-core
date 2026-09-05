@@ -52,7 +52,7 @@
 //! ## Basic File Matching
 //!
 //! ```rust,ignore
-//! use subx_cli::core::matcher::{MatchEngine, MatchConfig, FileDiscovery};
+//! use subx_core::core::matcher::{MatchEngine, MatchConfig, FileDiscovery};
 //! use std::path::Path;
 //!
 //! // Configure matching parameters
@@ -86,7 +86,7 @@
 //! ## Advanced Matching with Language Filtering
 //!
 //! ```rust,ignore
-//! use subx_cli::core::matcher::MatchConfig;
+//! use subx_core::core::matcher::MatchConfig;
 //!
 //! let config = MatchConfig {
 //!     target_languages: vec!["zh".to_string(), "en".to_string()],
@@ -203,7 +203,7 @@ use std::path::{Path, PathBuf};
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::core::matcher::FileInfo;
+/// use subx_core::core::matcher::FileInfo;
 /// use std::path::PathBuf;
 ///
 /// let root = PathBuf::from("/media/movies");
@@ -285,7 +285,7 @@ impl FileInfo {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// use subx_cli::core::matcher::FileInfo;
+    /// use subx_core::core::matcher::FileInfo;
     /// use std::path::PathBuf;
     ///
     /// // Simple file in root directory

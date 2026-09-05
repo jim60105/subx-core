@@ -29,12 +29,12 @@ pub mod engine;
 pub mod request;
 
 /// Backward-compatibility shim for the original
-/// `subx_cli::core::translation::uuidv7` module path.
+/// `subx_core::core::translation::uuidv7` module path.
 ///
 /// The UUIDv7 generator was relocated to [`crate::core::uuidv7`] when it
 /// became a shared dependency of the matcher and parallel layers; this
 /// shim preserves the old import path for downstream code that still
-/// references `subx_cli::core::translation::uuidv7::CueIdGenerator`.
+/// references `subx_core::core::translation::uuidv7::CueIdGenerator`.
 pub mod uuidv7 {
     pub use crate::core::uuidv7::{
         Uuidv7Generator, Uuidv7Generator as CueIdGenerator, generate_ids,

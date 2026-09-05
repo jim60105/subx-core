@@ -16,7 +16,7 @@ use thiserror::Error;
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::error::{SubXError, SubXResult};
+/// use subx_core::error::{SubXError, SubXResult};
 ///
 /// fn example() -> SubXResult<()> {
 ///     Err(SubXError::SubtitleFormat {
@@ -30,8 +30,8 @@ use thiserror::Error;
 ///
 /// Each error variant maps to a stable process exit code (1–6). That
 /// mapping is a property of running the `subx-cli` binary and lives in
-/// `crate::cli::error_ext::SubXErrorExt::exit_code` (rendered terminal
-/// prose likewise); this enum itself carries only the machine-readable
+/// that binary's `SubXErrorExt::exit_code` extension trait (rendered
+/// terminal prose likewise); this enum itself carries only the machine-readable
 /// contract — [`Self::category`], [`Self::machine_code`] and [`Self::hint`]
 /// — which library consumers can call without importing anything.
 #[derive(Error, Debug)]
@@ -578,7 +578,7 @@ impl SubXError {
     /// # Examples
     ///
     /// ```rust
-    /// # use subx_cli::error::SubXError;
+    /// # use subx_core::error::SubXError;
     /// let err = SubXError::config("invalid setting");
     /// assert_eq!(err.to_string(), "Configuration error: invalid setting");
     /// ```
@@ -593,7 +593,7 @@ impl SubXError {
     /// # Examples
     ///
     /// ```rust
-    /// # use subx_cli::error::SubXError;
+    /// # use subx_core::error::SubXError;
     /// let err = SubXError::subtitle_format("SRT", "invalid timestamp");
     /// assert!(err.to_string().contains("SRT"));
     /// ```
@@ -613,7 +613,7 @@ impl SubXError {
     /// # Examples
     ///
     /// ```rust
-    /// # use subx_cli::error::SubXError;
+    /// # use subx_core::error::SubXError;
     /// let err = SubXError::audio_processing("decode failed");
     /// assert_eq!(err.to_string(), "Audio processing error: decode failed");
     /// ```
@@ -628,7 +628,7 @@ impl SubXError {
     /// # Examples
     ///
     /// ```rust
-    /// # use subx_cli::error::SubXError;
+    /// # use subx_core::error::SubXError;
     /// let err = SubXError::ai_service("network failure");
     /// assert_eq!(err.to_string(), "AI service error: network failure");
     /// ```
@@ -641,7 +641,7 @@ impl SubXError {
     /// # Examples
     ///
     /// ```rust
-    /// # use subx_cli::error::SubXError;
+    /// # use subx_core::error::SubXError;
     /// let err = SubXError::file_matching("not found");
     /// assert_eq!(err.to_string(), "File matching error: not found");
     /// ```

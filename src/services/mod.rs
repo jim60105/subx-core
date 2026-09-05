@@ -36,11 +36,11 @@
 //!
 //! ## AI-Powered Matching
 //! ```rust,ignore
-//! use subx_cli::core::ComponentFactory;
-//! use subx_cli::config::ProductionConfigService;
+//! use subx_core::core::ComponentFactory;
+//! use subx_core::config::ProductionConfigService;
 //! use std::sync::Arc;
 //!
-//! async fn intelligent_matching() -> subx_cli::Result<()> {
+//! async fn intelligent_matching() -> subx_core::Result<()> {
 //!     let config_service = Arc::new(ProductionConfigService::new()?);
 //!     let factory = ComponentFactory::new(config_service.as_ref())?;
 //!     let ai_client = factory.create_ai_provider()?;
@@ -53,10 +53,10 @@
 //!
 //! ## Audio Synchronization
 //! ```rust,ignore
-//! use subx_cli::services::vad::LocalVadDetector;
-//! use subx_cli::config::VadConfig;
+//! use subx_core::services::vad::LocalVadDetector;
+//! use subx_core::config::VadConfig;
 //!
-//! async fn synchronize_audio() -> subx_cli::Result<()> {
+//! async fn synchronize_audio() -> subx_core::Result<()> {
 //!     let vad_config = VadConfig::default();
 //!     let detector = LocalVadDetector::new(vad_config)?;
 //!

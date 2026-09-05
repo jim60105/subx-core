@@ -10,7 +10,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use subx_cli::core::formats::{SubtitleFormat, sub::SubFormat};
+//! use subx_core::core::formats::{SubtitleFormat, sub::SubFormat};
 //! let sub = SubFormat;
 //! let content = "{0}{25}Hello\n";
 //! let subtitle = sub.parse(content).unwrap();

@@ -11,7 +11,7 @@
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::{test_with_config, config::{TestConfigBuilder, ConfigService}};
+/// use subx_core::{test_with_config, config::{TestConfigBuilder, ConfigService}};
 ///
 /// test_with_config!(
 ///     TestConfigBuilder::new().with_ai_provider("openai"),
@@ -41,7 +41,7 @@ macro_rules! test_with_config {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::{test_production_config_with_env, std::collections::HashMap};
+/// use subx_core::{test_production_config_with_env, std::collections::HashMap};
 ///
 /// let env_vars = [
 ///     ("OPENAI_API_KEY", "sk-test-key"),
@@ -93,7 +93,7 @@ macro_rules! test_production_config_with_env {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::test_production_config_with_openai_env;
+/// use subx_core::test_production_config_with_openai_env;
 ///
 /// test_production_config_with_openai_env!(
 ///     Some("sk-test-key"),
@@ -150,7 +150,7 @@ macro_rules! test_production_config_with_openai_env {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::create_production_config_service_with_env;
+/// use subx_core::create_production_config_service_with_env;
 ///
 /// fn my_test() {
 ///     let env_vars = [("OPENAI_API_KEY", "sk-test")].iter().cloned().collect();
@@ -194,7 +194,7 @@ macro_rules! create_production_config_service_with_env {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::create_production_config_service_with_empty_env;
+/// use subx_core::create_production_config_service_with_empty_env;
 ///
 /// fn my_test() {
 ///     create_production_config_service_with_empty_env!(service);
@@ -319,7 +319,7 @@ mod env_macro_tests {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::{test_with_default_config, config::ConfigService};
+/// use subx_core::{test_with_default_config, config::ConfigService};
 ///
 /// test_with_default_config!(|config_service: &dyn ConfigService| {
 ///     let config = config_service.get_config().unwrap();
@@ -341,7 +341,7 @@ macro_rules! test_with_default_config {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::{test_with_ai_config, config::ConfigService};
+/// use subx_core::{test_with_ai_config, config::ConfigService};
 ///
 /// test_with_ai_config!("anthropic", "claude-3", |config_service: &dyn ConfigService| {
 ///     let config = config_service.get_config().unwrap();
@@ -369,7 +369,7 @@ macro_rules! test_with_ai_config {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::{test_with_ai_config_and_key, config::ConfigService};
+/// use subx_core::{test_with_ai_config_and_key, config::ConfigService};
 ///
 /// test_with_ai_config_and_key!("openai", "gpt-4.1", "test-key", |config_service: &dyn ConfigService| {
 ///     let config = config_service.get_config().unwrap();
@@ -399,7 +399,7 @@ macro_rules! test_with_ai_config_and_key {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::{test_with_sync_config, config::ConfigService};
+/// use subx_core::{test_with_sync_config, config::ConfigService};
 ///
 /// test_with_sync_config!(0.8, 45.0, |config_service: &dyn ConfigService| {
 ///     let config = config_service.get_config().unwrap();
@@ -427,7 +427,7 @@ macro_rules! test_with_sync_config {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::{test_with_parallel_config, config::ConfigService};
+/// use subx_core::{test_with_parallel_config, config::ConfigService};
 ///
 /// test_with_parallel_config!(8, 200, |config_service: &dyn ConfigService| {
 ///     let config = config_service.get_config().unwrap();
@@ -455,7 +455,7 @@ macro_rules! test_with_parallel_config {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::create_test_config_service;
+/// use subx_core::create_test_config_service;
 ///
 /// fn my_test() {
 ///     create_test_config_service!(service, TestConfigBuilder::new().with_ai_provider("openai"));
@@ -479,7 +479,7 @@ macro_rules! create_test_config_service {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::create_default_test_config_service;
+/// use subx_core::create_default_test_config_service;
 ///
 /// fn my_test() {
 ///     create_default_test_config_service!(service);

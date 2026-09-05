@@ -245,7 +245,7 @@ impl LocalVadDetector {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::services::vad::LocalVadDetector;
+    /// use subx_core::services::vad::LocalVadDetector;
     /// let detector = LocalVadDetector::new(Default::default()).unwrap();
     /// assert_eq!(detector.calculate_chunk_size(8000), 256);
     /// assert_eq!(detector.calculate_chunk_size(16000), 512);

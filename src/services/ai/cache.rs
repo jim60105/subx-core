@@ -29,7 +29,7 @@
 //!
 //! ## Basic Caching Operation
 //! ```rust,ignore
-//! use subx_cli::services::ai::{AICache, AnalysisRequest};
+//! use subx_core::services::ai::{AICache, AnalysisRequest};
 //! use std::time::Duration;
 //!
 //! // Create cache with 1-hour TTL
@@ -49,7 +49,7 @@
 //!
 //! ## Cache Management
 //! ```rust,ignore
-//! use subx_cli::services::ai::AICache;
+//! use subx_core::services::ai::AICache;
 //!
 //! let cache = AICache::new(Duration::from_secs(1800)); // 30 minutes
 //!

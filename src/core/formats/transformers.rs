@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! ```rust,ignore
-//! use subx_cli::core::formats::{FormatConverter, Subtitle};
+//! use subx_core::core::formats::{FormatConverter, Subtitle};
 //! // Convert a subtitle object to a target format
 //! let converter = FormatConverter::new();
 //! let transformed = converter.transform_subtitle(subtitle.clone(), "ass").unwrap();

@@ -28,7 +28,7 @@
 //! ## Basic Format Detection and Parsing
 //!
 //! ```rust,ignore
-//! use subx_cli::core::formats::{manager::FormatManager, SubtitleFormatType};
+//! use subx_core::core::formats::{manager::FormatManager, SubtitleFormatType};
 //! use std::path::Path;
 //!
 //! // Create format manager
@@ -46,7 +46,7 @@
 //! ## Format Conversion
 //!
 //! ```rust,ignore
-//! use subx_cli::core::formats::converter::FormatConverter;
+//! use subx_core::core::formats::converter::FormatConverter;
 //!
 //! let converter = FormatConverter::new();
 //!
@@ -64,7 +64,7 @@
 //! ## Working with Styling Information
 //!
 //! ```rust,ignore
-//! use subx_cli::core::formats::{StylingInfo, SubtitleEntry};
+//! use subx_core::core::formats::{StylingInfo, SubtitleEntry};
 //! use std::time::Duration;
 //!
 //! // Create a styled subtitle entry

@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! ```rust,no_run
-//! use subx_cli::core::formats::manager::FormatManager;
+//! use subx_core::core::formats::manager::FormatManager;
 //! let manager = FormatManager::new();
 //! let content = "1\n00:00:01,000 --> 00:00:02,000\nHello world\n";
 //! let subtitle = manager.parse_auto(content).unwrap();

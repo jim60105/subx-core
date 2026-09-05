@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! ```rust,ignore
-//! use subx_cli::core::formats::styling::apply_styling;
+//! use subx_core::core::formats::styling::apply_styling;
 //! // ... apply styling adjustments to entries
 //! ```
 

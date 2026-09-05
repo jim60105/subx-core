@@ -38,7 +38,7 @@
 //! # Examples
 //!
 //! ```rust,no_run
-//! use subx_cli::config::{Config, ConfigService, ProductionConfigService};
+//! use subx_core::config::{Config, ConfigService, ProductionConfigService};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create a production configuration service
@@ -86,7 +86,7 @@ pub use masking::mask_sensitive_value;
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::config::Config;
+/// use subx_core::config::Config;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = Config::default();
@@ -101,7 +101,7 @@ pub use masking::mask_sensitive_value;
 /// This struct can be serialized to/from TOML format for configuration files.
 ///
 /// ```rust
-/// use subx_cli::config::Config;
+/// use subx_core::config::Config;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = Config::default();
@@ -138,7 +138,7 @@ pub struct Config {
 ///
 /// Creating a default configuration:
 /// ```rust
-/// use subx_cli::config::AIConfig;
+/// use subx_core::config::AIConfig;
 ///
 /// let ai_config = AIConfig::default();
 /// assert_eq!(ai_config.provider, "openai");
@@ -233,7 +233,7 @@ impl Default for AIConfig {
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::config::FormatsConfig;
+/// use subx_core::config::FormatsConfig;
 ///
 /// let formats = FormatsConfig::default();
 /// assert_eq!(formats.default_output, "srt");
@@ -323,7 +323,7 @@ pub struct SyncConfig {
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::config::VadConfig;
+/// use subx_core::config::VadConfig;
 ///
 /// let vad = VadConfig::default();
 /// assert!(vad.enabled);
@@ -384,7 +384,7 @@ impl Default for VadConfig {
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::config::GeneralConfig;
+/// use subx_core::config::GeneralConfig;
 ///
 /// let config = GeneralConfig::default();
 /// assert_eq!(config.max_concurrent_jobs, 4);
@@ -434,7 +434,7 @@ impl Default for GeneralConfig {
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::config::{ParallelConfig, OverflowStrategy};
+/// use subx_core::config::{ParallelConfig, OverflowStrategy};
 ///
 /// let parallel = ParallelConfig::default();
 /// assert!(parallel.max_workers > 0);
@@ -479,7 +479,7 @@ impl Default for ParallelConfig {
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::config::OverflowStrategy;
+/// use subx_core::config::OverflowStrategy;
 ///
 /// let strategy = OverflowStrategy::Block;
 /// assert_eq!(strategy, OverflowStrategy::Block);
@@ -526,7 +526,7 @@ pub enum OverflowStrategy {
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::config::TranslationConfig;
+/// use subx_core::config::TranslationConfig;
 ///
 /// let cfg = TranslationConfig::default();
 /// assert!(cfg.batch_size > 0);

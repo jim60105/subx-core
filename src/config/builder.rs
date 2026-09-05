@@ -14,7 +14,7 @@ use crate::config::{Config, OverflowStrategy};
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::config::TestConfigBuilder;
+/// use subx_core::config::TestConfigBuilder;
 ///
 /// let config = TestConfigBuilder::new()
 ///     .with_ai_provider("openai")
@@ -356,7 +356,7 @@ impl TestConfigBuilder {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::config::TestConfigBuilder;
+    /// use subx_core::config::TestConfigBuilder;
     ///
     /// let config = TestConfigBuilder::new()
     ///     .with_mock_ai_server("http://localhost:3000")

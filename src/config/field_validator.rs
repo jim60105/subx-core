@@ -38,7 +38,7 @@ use crate::{Result, error::SubXError};
 /// # Examples
 ///
 /// ```
-/// use subx_cli::config::field_validator::normalize_ai_provider;
+/// use subx_core::config::field_validator::normalize_ai_provider;
 ///
 /// assert_eq!(normalize_ai_provider("ollama"), "local");
 /// assert_eq!(normalize_ai_provider("OLLAMA"), "local");

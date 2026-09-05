@@ -10,7 +10,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use subx_cli::core::formats::{SubtitleFormat, vtt::VttFormat};
+//! use subx_core::core::formats::{SubtitleFormat, vtt::VttFormat};
 //! let vtt = VttFormat;
 //! let content = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello";
 //! let subtitle = vtt.parse(content).unwrap();

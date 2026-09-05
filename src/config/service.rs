@@ -707,7 +707,11 @@ impl ProductionConfigService {
 /// tolerant `config get` paths. Returns the value as a string (numerics
 /// are stringified, missing optional values are returned as the empty
 /// string), or `Err` for an unknown key.
-pub(crate) fn read_config_value_from(config: &Config, key: &str) -> Result<String> {
+///
+/// Public because the `subx-cli` `config get` command is its other caller:
+/// the lookup table lives here with the [`Config`] type, and the CLI crate
+/// reaches it across the crate boundary.
+pub fn read_config_value_from(config: &Config, key: &str) -> Result<String> {
     let parts: Vec<&str> = key.split('.').collect();
     match parts.as_slice() {
         ["ai", "provider"] => Ok(config.ai.provider.clone()),

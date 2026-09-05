@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use subx_cli::core::language::LanguageDetector;
+//! use subx_core::core::language::LanguageDetector;
 //! use std::path::Path;
 //!
 //! let detector = LanguageDetector::new();

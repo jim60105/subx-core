@@ -56,7 +56,7 @@
 //! ## Basic Task Execution
 //!
 //! ```rust,ignore
-//! use subx_cli::core::parallel::{TaskScheduler, Task, ProcessingOperation};
+//! use subx_core::core::parallel::{TaskScheduler, Task, ProcessingOperation};
 //! use std::path::PathBuf;
 //!
 //! // Create a task scheduler with default configuration
@@ -80,7 +80,7 @@
 //! ## Batch Processing
 //!
 //! ```rust,ignore
-//! use subx_cli::core::parallel::{FileProcessingTask, TaskScheduler};
+//! use subx_core::core::parallel::{FileProcessingTask, TaskScheduler};
 //!
 //! let scheduler = TaskScheduler::new().await?;
 //! let mut tasks = Vec::new();
@@ -109,7 +109,7 @@
 //! ## Custom Worker Configuration
 //!
 //! ```rust,ignore
-//! use subx_cli::core::parallel::{TaskScheduler, WorkerConfig};
+//! use subx_core::core::parallel::{TaskScheduler, WorkerConfig};
 //!
 //! let config = WorkerConfig {
 //!     max_workers: 8,

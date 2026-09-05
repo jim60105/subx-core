@@ -16,7 +16,7 @@
 //! # Examples
 //!
 //! ```rust,no_run
-//! use subx_cli::core::formats::{SubtitleFormat, ass::AssFormat};
+//! use subx_core::core::formats::{SubtitleFormat, ass::AssFormat};
 //! let ass = AssFormat;
 //! let content = "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,0:00:01.00,0:00:02.50,Default,,0000,0000,0000,,Hello";
 //! let subtitle = ass.parse(content).unwrap();

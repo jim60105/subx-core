@@ -48,10 +48,10 @@
 //!
 //! ## Audio Synchronization
 //! ```rust,ignore
-//! use subx_cli::services::vad::LocalVadDetector;
-//! use subx_cli::config::VadConfig;
+//! use subx_core::services::vad::LocalVadDetector;
+//! use subx_core::config::VadConfig;
 //!
-//! async fn synchronize_audio() -> subx_cli::Result<()> {
+//! async fn synchronize_audio() -> subx_core::Result<()> {
 //!     let vad_config = VadConfig::default();
 //!     let detector = LocalVadDetector::new(vad_config)?;
 //!

@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! ```rust,ignore
-//! use subx_cli::core::matcher::engine::{MatchEngine, MatchConfig};
+//! use subx_core::core::matcher::engine::{MatchEngine, MatchConfig};
 //! // Create a match engine with default configuration
 //! let config = MatchConfig { confidence_threshold: 0.8, max_sample_length: 1024, enable_content_analysis: true, backup_enabled: false };
 //! let engine = MatchEngine::new(Box::new(DummyAI), config);

@@ -7,7 +7,7 @@
 //! # Examples
 //!
 //! ```rust,ignore
-//! use subx_cli::core::formats::converter::FormatConverter;
+//! use subx_core::core::formats::converter::FormatConverter;
 //! // Initialize with default configuration and run conversion tasks
 //! let converter = FormatConverter::new(Default::default());
 //! ```

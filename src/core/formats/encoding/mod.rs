@@ -14,7 +14,7 @@
 //! # Examples
 //!
 //! ```rust,ignore
-//! use subx_cli::core::formats::encoding::{EncodingDetector, EncodingConverter, Charset};
+//! use subx_core::core::formats::encoding::{EncodingDetector, EncodingConverter, Charset};
 //!
 //! // Detect encoding of a subtitle file
 //! let detector = EncodingDetector::new()?;

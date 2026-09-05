@@ -12,10 +12,10 @@
 //! # Usage
 //!
 //! ```no_run
-//! use subx_cli::core::sync::{SyncEngine, SyncMethod};
-//! use subx_cli::config::SyncConfig;
+//! use subx_core::core::sync::{SyncEngine, SyncMethod};
+//! use subx_core::config::SyncConfig;
 //! use std::path::Path;
-//! use subx_cli::core::formats::{Subtitle, SubtitleFormatType, SubtitleMetadata};
+//! use subx_core::core::formats::{Subtitle, SubtitleFormatType, SubtitleMetadata};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let engine = SyncEngine::new(SyncConfig::default())?;
@@ -269,7 +269,7 @@ pub fn resolve_sync_pairing(request: &SyncPairingRequest) -> Result<SyncMode, Su
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use subx_cli::core::sync::create_default_output_path;
+/// use subx_core::core::sync::create_default_output_path;
 ///
 /// assert_eq!(
 ///     create_default_output_path(&PathBuf::from("subs/movie.srt")),

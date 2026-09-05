@@ -20,7 +20,7 @@
 //!
 //! ```rust,no_run
 //! # use std::path::Path;
-//! # use subx_cli::core::file_manager::FileManager;
+//! # use subx_core::core::file_manager::FileManager;
 //! let mut manager = FileManager::new();
 //!
 //! // Process multiple files
@@ -36,7 +36,7 @@
 //!
 //! ```rust,no_run
 //! # use std::path::Path;
-//! # use subx_cli::core::file_manager::FileManager;
+//! # use subx_core::core::file_manager::FileManager;
 //! let mut manager = FileManager::new();
 //!
 //! // Remove old file (automatically backed up)
@@ -78,7 +78,7 @@ use crate::{Result, error::SubXError};
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::core::file_manager::FileManager;
+/// use subx_core::core::file_manager::FileManager;
 /// use std::path::Path;
 ///
 /// let mut manager = FileManager::new();
@@ -151,7 +151,7 @@ impl FileManager {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::core::file_manager::FileManager;
+    /// use subx_core::core::file_manager::FileManager;
     ///
     /// let manager = FileManager::new();
     /// ```
@@ -189,7 +189,7 @@ impl FileManager {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::core::file_manager::FileManager;
+    /// use subx_core::core::file_manager::FileManager;
     /// use std::path::Path;
     ///
     /// let mut manager = FileManager::new();
@@ -265,7 +265,7 @@ impl FileManager {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::core::file_manager::FileManager;
+    /// use subx_core::core::file_manager::FileManager;
     ///
     /// let mut manager = FileManager::new();
     /// // ... perform some file operations ...
@@ -302,7 +302,7 @@ impl FileManager {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::core::file_manager::FileManager;
+    /// use subx_core::core::file_manager::FileManager;
     ///
     /// let manager = FileManager::new();
     /// assert_eq!(manager.operation_count(), 0);

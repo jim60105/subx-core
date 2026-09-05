@@ -20,7 +20,7 @@ use std::time::Duration;
 /// # Examples
 ///
 /// ```rust
-/// use subx_cli::core::formats::SubtitleFormatType;
+/// use subx_core::core::formats::SubtitleFormatType;
 ///
 /// let format = SubtitleFormatType::Srt;
 /// assert_eq!(format.as_str(), "srt");
@@ -80,7 +80,7 @@ impl SubtitleFormatType {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::core::formats::SubtitleFormatType;
+    /// use subx_core::core::formats::SubtitleFormatType;
     ///
     /// assert_eq!(SubtitleFormatType::Srt.as_str(), "srt");
     /// assert_eq!(SubtitleFormatType::Ass.as_str(), "ass");
@@ -119,7 +119,7 @@ impl SubtitleFormatType {
     /// # Examples
     ///
     /// ```rust
-    /// use subx_cli::core::formats::SubtitleFormatType;
+    /// use subx_core::core::formats::SubtitleFormatType;
     ///
     /// assert!(SubtitleFormatType::Ass.supports_advanced_styling());
     /// assert!(SubtitleFormatType::Vtt.supports_advanced_styling());
@@ -159,7 +159,7 @@ impl std::fmt::Display for SubtitleFormatType {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::core::formats::{Subtitle, SubtitleEntry, SubtitleMetadata, SubtitleFormatType};
+/// use subx_core::core::formats::{Subtitle, SubtitleEntry, SubtitleMetadata, SubtitleFormatType};
 /// use std::time::Duration;
 ///
 /// let subtitle = Subtitle {
@@ -207,7 +207,7 @@ impl Subtitle {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// use subx_cli::core::formats::{Subtitle, SubtitleMetadata, SubtitleFormatType};
+    /// use subx_core::core::formats::{Subtitle, SubtitleMetadata, SubtitleFormatType};
     ///
     /// let metadata = SubtitleMetadata::default();
     /// let subtitle = Subtitle::new(SubtitleFormatType::Srt, metadata);
@@ -291,7 +291,7 @@ impl Subtitle {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::core::formats::{SubtitleEntry, StylingInfo};
+/// use subx_core::core::formats::{SubtitleEntry, StylingInfo};
 /// use std::time::Duration;
 ///
 /// // Basic subtitle entry
@@ -368,7 +368,7 @@ impl SubtitleEntry {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// use subx_cli::core::formats::SubtitleEntry;
+    /// use subx_core::core::formats::SubtitleEntry;
     /// use std::time::Duration;
     ///
     /// let entry = SubtitleEntry::new(
@@ -477,7 +477,7 @@ impl SubtitleEntry {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::core::formats::{SubtitleMetadata, SubtitleFormatType};
+/// use subx_core::core::formats::{SubtitleMetadata, SubtitleFormatType};
 ///
 /// let metadata = SubtitleMetadata {
 ///     title: Some("Episode 1".to_string()),
@@ -609,7 +609,7 @@ impl Default for SubtitleMetadata {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::core::formats::StylingInfo;
+/// use subx_core::core::formats::StylingInfo;
 ///
 /// // Basic text styling
 /// let basic_style = StylingInfo {
@@ -794,7 +794,7 @@ impl StylingInfo {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use subx_cli::core::formats::{SubtitleFormat, Subtitle};
+/// use subx_core::core::formats::{SubtitleFormat, Subtitle};
 ///
 /// struct MyFormat;
 ///

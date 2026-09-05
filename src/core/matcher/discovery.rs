@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! ```rust,ignore
-//! use subx_cli::core::matcher::discovery::FileDiscovery;
+//! use subx_core::core::matcher::discovery::FileDiscovery;
 //! let disco = FileDiscovery::new();
 //! let files = disco.scan_directory("./path".as_ref(), true).unwrap();
 //! ```

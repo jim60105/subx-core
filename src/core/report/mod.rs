@@ -41,7 +41,7 @@ use std::sync::Arc;
 /// # Examples
 ///
 /// ```
-/// use subx_cli::core::report::Reporter;
+/// use subx_core::core::report::Reporter;
 ///
 /// /// Only interested in warnings; silent on everything else.
 /// struct WarningCounter(std::sync::atomic::AtomicUsize);
@@ -123,7 +123,7 @@ pub trait Reporter: Send + Sync {
 /// # Examples
 ///
 /// ```
-/// use subx_cli::core::report::{AiUsage, NoopReporter, ProgressEvent, Reporter};
+/// use subx_core::core::report::{AiUsage, NoopReporter, ProgressEvent, Reporter};
 ///
 /// let reporter = NoopReporter;
 /// reporter.diagnostic("ignored");
@@ -145,7 +145,7 @@ impl Reporter for NoopReporter {}
 /// # Examples
 ///
 /// ```
-/// use subx_cli::core::report::{ProgressEvent, Reporter, noop};
+/// use subx_core::core::report::{ProgressEvent, Reporter, noop};
 ///
 /// let reporter = noop();
 /// // Compiles and does nothing.
@@ -163,7 +163,7 @@ pub fn noop() -> Arc<dyn Reporter> {
 /// # Examples
 ///
 /// ```
-/// use subx_cli::core::report::AiUsage;
+/// use subx_core::core::report::AiUsage;
 ///
 /// let usage = AiUsage {
 ///     model: "gpt-4.1-mini".to_string(),
@@ -197,7 +197,7 @@ pub struct AiUsage {
 /// # Examples
 ///
 /// ```
-/// use subx_cli::core::report::ProgressEvent;
+/// use subx_core::core::report::ProgressEvent;
 ///
 /// let event = ProgressEvent::Message("📊 Translation Progress:\n   Processed cues: 2/2");
 /// match &event {
