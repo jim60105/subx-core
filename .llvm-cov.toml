@@ -1,0 +1,23 @@
+# cargo llvm-cov configuration
+# Reference: https://github.com/taiki-e/cargo-llvm-cov
+
+# Excluded file patterns
+exclude-from-report = [
+    "benches/*",
+    "tests/*",
+]
+
+# Default output formats
+output-formats = ["html", "lcov"]
+
+# HTML report output directory
+output-dir = "target/llvm-cov"
+
+# LCOV file output path
+lcov-output-path = "target/llvm-cov/lcov.info"
+
+# Whether to include code in the report
+include-ffi = false
+
+# Whether to fail when a file cannot be found
+ignore-filename-regex = []

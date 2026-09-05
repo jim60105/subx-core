@@ -1,0 +1,57 @@
+# .config/nextest.toml
+#
+# Configuration for cargo nextest
+# https://nexte.st/book/configuration.html
+
+[profile.default]
+# Test timeout settings - local development environment, skip slow tests
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+# Maximum parallel test count, using the number of CPU cores
+test-threads = "num-cpus"
+
+# Number of retries
+retries = 1
+
+# Behaviour when tests fail
+failure-output = "immediate"
+
+# Test status level
+status-level = "pass"
+
+# Test output format
+final-status-level = "slow"
+
+[profile.ci]
+# CI environment settings
+retries = 2
+slow-timeout = { period = "300s", terminate-after = 2 }
+test-threads = 4
+failure-output = "final"
+status-level = "fail"
+
+[profile.ci.junit]
+# JUnit XML output settings - CI environment only
+path = "junit.xml"
+store-success-output = true
+store-failure-output = true
+
+[profile.quick]
+# Quick test settings
+retries = 0
+slow-timeout = { period = "30s", terminate-after = 1 }
+test-threads = "num-cpus"
+failure-output = "immediate"
+
+[profile.full]
+# Full test settings - includes slow tests
+retries = 1
+slow-timeout = { period = "600s", terminate-after = 2 }
+test-threads = "num-cpus"
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "slow"
+
+[profile.default.junit]
+# JUnit XML output settings
+path = "target/nextest/junit.xml"

@@ -1,0 +1,53 @@
+[package]
+name = "subx-core"
+version = "1.0.0"
+edition = "2024"
+authors = ["Jim Chen <Jim@ChenJ.im>"]
+description = "Core subtitle processing library for SubX: matching, format conversion, synchronization, and AI service integrations."
+license = "GPL-3.0-or-later"
+repository = "https://github.com/jim60105/subx-core"
+homepage = "https://github.com/jim60105/subx-core"
+keywords = ["subtitle", "library", "ai", "video"]
+categories = ["multimedia", "text-processing"]
+
+exclude = [
+    "assets/",
+    ".github/",
+    "tests/",
+    "target/",
+    "*.mp4",
+    "*.mp3",
+    "*.mov",
+    "*.avi",
+    "*.mkv",
+    "benches/",
+    "**/*.log",
+    "**/*.tmp",
+    "**/.DS_Store",
+    "Cargo.lock",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+# Documentation quality linting
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_doc_tests = "warn"
+invalid_rust_codeblocks = "warn"
+bare_urls = "warn"
+
+[lints.clippy]
+missing_docs_in_private_items = "allow" # Allow missing private docs
+doc_markdown = "allow"                  # Allow markdown formatting warnings
+
+[lints.rust]
+missing_docs = "allow" # Allow missing docs at rust level
+
+[dependencies]
+
+[dev-dependencies]
