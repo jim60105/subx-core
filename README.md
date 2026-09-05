@@ -14,17 +14,18 @@ clap surface, no terminal presentation code.
 
 ## Installation
 
-Add the published crate with:
-
-```sh
-cargo add subx-core
-```
-
-Or depend on it directly from the repository:
+Add the crate from this repository with:
 
 ```toml
 [dependencies]
 subx-core = { git = "https://github.com/jim60105/subx-core", version = "1.0" }
+```
+
+Once the crate's first release is on crates.io, `cargo add subx-core` works as
+well:
+
+```sh
+cargo add subx-core
 ```
 
 ## Relationship to `subx-cli` and the SubX GUI
