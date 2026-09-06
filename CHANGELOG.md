@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `subx_core::core::sync::shift_subtitle_timing(subtitle, offset_seconds)` — the manual-offset timing transform as a free function, reachable without constructing a `SyncEngine` (whose `new` requires a VAD detector even for manual-offset-only callers). It deliberately does not enforce `sync.max_offset_seconds`. `SyncEngine::apply_manual_offset` now delegates to it after its own guard, so exactly one implementation of the shift exists.
 
 ### Changed
-- `SubtitleFormat` declares `Send + Sync` supertraits, which makes `Box<dyn SubtitleFormat>` thread-safe and, in turn, `FormatManager`, `FormatConverter` and `TranslationEngine` `Send + Sync`; the guarantee is asserted at compile time by the `thread_safety` module in `src/core/mod.rs`. In semver terms this is a `trait_added_supertrait` **major** change; it lands inside the 1.0.0 surface rather than against it (the crate is not yet published, so the break has no audience).
+- `SubtitleFormat` declares `Send + Sync` supertraits, which makes `Box<dyn SubtitleFormat>` thread-safe and, in turn, `FormatManager`, `FormatConverter` and `TranslationEngine` `Send + Sync`; the guarantee is asserted at compile time by the `thread_safety` module in `src/core/mod.rs`. In semver terms this is a `trait_added_supertrait` **major** change; it lands inside the 1.0.0 surface rather than against it — the release below has not been cut yet (no `v*` tag, `cargo publish` runs later from the tag), so when 1.0.0 ships this entry folds into it and the break has no audience.
 
 ## [1.0.0] - 2026-09-06
 
