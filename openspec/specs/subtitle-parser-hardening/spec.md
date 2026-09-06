@@ -199,10 +199,10 @@ against `subx-core`'s own committed lockfile).
 ### Requirement: Optional cargo-fuzz harness lives outside default workspace
 
 If a `cargo-fuzz` harness is added for any format parser, it SHALL live
-in a sibling `fuzz/` directory — `subx-core/fuzz/`, the repository holding
-the parsers — that is excluded from both workspace roots: `subx-cli/Cargo.toml`
+in a sibling `fuzz/` directory — alongside the parsers in this repository —
+that is excluded from both workspace roots: `subx-cli/Cargo.toml`
 and any standalone `subx-core` build. The harness MUST NOT be required for any
-default build, default test run, `subx-core/scripts/quality_check.sh` invocation,
+default build, default test run, `scripts/quality_check.sh` invocation,
 or release build, so that CI runtime and the supply-chain footprint of
 the default build are unchanged.
 
@@ -218,7 +218,7 @@ the default build are unchanged.
 
 #### Scenario: quality check does not depend on fuzz harness
 
-- **WHEN** `subx-core/scripts/quality_check.sh` (or `-v -p ci --full`) is invoked
+- **WHEN** `scripts/quality_check.sh` (or `-v -p ci --full`) is invoked
 - **THEN** it SHALL pass without requiring `cargo-fuzz` to be installed
   and without invoking any fuzz target
 

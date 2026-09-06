@@ -22,7 +22,7 @@
 ## 4. Documentation
 
 - [x] 4.1 `CHANGELOG.md` `[Unreleased]` `### Added`: OpenSpec root + thirteen capabilities (96 requirements / 254 scenarios); `### Documentation`: provenance + handoff record for C2b (re-qualify `local-llm-provider`'s three references, `configuration-management`/`error-handling` split halves) and C3 (drift-check home, `subx-core/AGENTS.md` handoff block)
-- [ ] 4.2 Commit `feat(specs): import thirteen core capabilities from subx-cli`; merge commit `chore(specs): merge filtered spec history from subx-cli`; push `origin main`
+- [x] 4.2 Commit `feat(specs): import thirteen core capabilities from subx-cli`; merge commit `chore(specs): merge filtered spec history from subx-cli`; push `origin main` (landed: `1a49e4a` feat + `113bb03` history merge, pushed to `origin main` on 2026-09-06; the merge resolves the add/add on `openspec/specs/**` to ours — the archive-repaired tree — byte-identical to the archived specs)
 
 ## 5. Quality Gate
 
