@@ -8,9 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ComponentFactory::match_config()` (the `MatchConfig` the factory's loaded `Config` implies, with the four caller-controlled fields documented for mutation) and `ComponentFactory::create_match_engine_with(config)` (engine from a caller-chosen config under the same propagation terms as `create_match_engine`). Minor-version additions.
+- `CollectedFiles::default_output_dir()` and `CollectedFiles::default_output_path()` — the archive-aware output-location resolution rules (convert's and translate's, verbatim) as public queries. Minor-version additions.
+- `subx_core::core::matcher::engine::apply_archive_origin_relocation(operations, files)` — the archive-extracted-subtitle forced-copy rewrite as a named core behaviour (MUST run before `apply_unique_target_paths`). Minor-version addition.
+- `ProgressEvent::{Started, Advanced, Finished}` — structured batch-stream variants (`done: u64`, `Advanced::item: Option<&str>` for the subtitle the unit just completed). `ProgressEvent` stays `#[non_exhaustive]`, which is precisely why adding variants is a minor-version change: downstream wildcard arms are mandatory and keep compiling.
+- `Reporter::cancelled()` — provided-method cooperative-cancellation query (default `false`), so a UI or CLI attached to an engine can stop a batch between operations. Minor-version addition.
 - `subx_core::core::sync::shift_subtitle_timing(subtitle, offset_seconds)` — the manual-offset timing transform as a free function, reachable without constructing a `SyncEngine` (whose `new` requires a VAD detector even for manual-offset-only callers). It deliberately does not enforce `sync.max_offset_seconds`. `SyncEngine::apply_manual_offset` now delegates to it after its own guard, so exactly one implementation of the shift exists.
 
 ### Changed
+- `MatchEngine::execute_operations_audit` now polls the attached reporter's `cancelled()` between operations: on cancellation it stops, pads the remaining `OperationOutcome` slots with `{ applied: false, error: None }` (the one-outcome-per-operation arity contract holds), closes its progress stream with `Finished { done, total }` where `done < total`, and returns `Ok` — cancellation never surfaces as `Err`. Both execution loops additionally emit `Started`/`Advanced`/`Finished` progress events (dry runs emit nothing). With no reporter attached, outcomes are unchanged.
+- Open question for the next API review: whether `MatchConfig` should become `#[non_exhaustive]` (mirroring `ProgressEvent`) so future field additions stop breaking the exhaustive literals callers like `cache_command.rs` still write. Left open deliberately in this change.
 - `SubtitleFormat` declares `Send + Sync` supertraits, which makes `Box<dyn SubtitleFormat>` thread-safe and, in turn, `FormatManager`, `FormatConverter` and `TranslationEngine` `Send + Sync`; the guarantee is asserted at compile time by the `thread_safety` module in `src/core/mod.rs`. In semver terms this is a `trait_added_supertrait` **major** change; it lands inside the 1.0.0 surface rather than against it — the release below has not been cut yet (no `v*` tag, `cargo publish` runs later from the tag), so when 1.0.0 ships this entry folds into it and the break has no audience.
 
 ## [1.0.0] - 2026-09-06

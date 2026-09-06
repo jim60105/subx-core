@@ -79,7 +79,13 @@ impl ComponentFactory {
     }
 
     /// Clone the factory's reporting sink for attachment to a component.
-    fn reporter(&self) -> std::sync::Arc<dyn crate::core::report::Reporter> {
+    ///
+    /// Public so callers that construct a component outside the factory's
+    /// control (e.g. a `MatchEngine` around an externally supplied AI
+    /// client) can still wire the command's single reporter — the CLI's
+    /// `match` command does exactly this while adopting
+    /// [`ComponentFactory::match_config`].
+    pub fn reporter(&self) -> std::sync::Arc<dyn crate::core::report::Reporter> {
         std::sync::Arc::clone(&self.reporter)
     }
 
