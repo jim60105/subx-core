@@ -5,7 +5,6 @@ use subx_core::services::ai::retry::HttpRetryClient;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-
 /// Mock implementation of HttpRetryClient for testing
 struct MockRetryClient {
     retry_attempts: u32,

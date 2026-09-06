@@ -7,7 +7,6 @@ use subx_core::services::ai::prompts::{
 };
 use subx_core::services::ai::{AnalysisRequest, ContentSample, VerificationRequest};
 
-
 /// Test build_analysis_prompt_base function directly
 #[tokio::test]
 async fn test_build_analysis_prompt_base_function() {

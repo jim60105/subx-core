@@ -18,8 +18,10 @@ async fn test_sync_first_sentence_with_assets() {
     let sync_engine = SyncEngine::new(sync_config).expect("Failed to create SyncEngine");
 
     // Load audio and subtitle assets
-    let audio_path = &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/SubX - The Subtitle Revolution.mp3");
-    let subtitle_path = &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/SubX - The Subtitle Revolution.srt");
+    let audio_path = &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/SubX - The Subtitle Revolution.mp3");
+    let subtitle_path = &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/SubX - The Subtitle Revolution.srt");
     println!("[TEST] Loading subtitle file: {:?}", subtitle_path);
     let subtitle = FormatManager::new()
         .load_subtitle(subtitle_path)

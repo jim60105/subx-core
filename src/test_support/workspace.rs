@@ -9,10 +9,10 @@
 //! module, where an accidental relative `mod` reference meant they were never
 //! compiled; moving them here is what finally makes them run.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use crate::Result;
 use crate::config::{ConfigService, TestConfigService};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
 

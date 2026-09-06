@@ -6,7 +6,6 @@ use subx_core::services::ai::openrouter::OpenRouterClient;
 /// This test file covers the HttpRetryClient trait and make_http_request_with_retry_impl function
 use subx_core::services::ai::retry::HttpRetryClient;
 
-
 /// Test HttpRetryClient trait for all AI provider types
 #[tokio::test]
 async fn test_http_retry_client_trait_all_providers() {

@@ -1,8 +1,8 @@
 //! Mock data generators, providing generation functionality for audio, subtitles and other test data.
 
+use crate::{Result, error::SubXError};
 use std::path::Path;
 use std::time::Duration;
-use crate::{Result, error::SubXError};
 use tokio::fs;
 
 /// Dialogue segment information

@@ -8,7 +8,6 @@ use subx_core::services::ai::prompts::{PromptBuilder, ResponseParser};
 use subx_core::services::ai::retry::HttpRetryClient;
 use subx_core::services::ai::{AnalysisRequest, ContentSample, VerificationRequest};
 
-
 /// Test PromptBuilder trait implementation for OpenAIClient
 #[tokio::test]
 async fn test_openai_client_prompt_builder_trait() {

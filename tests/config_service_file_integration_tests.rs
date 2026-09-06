@@ -3,11 +3,11 @@
 // B3: the helper moved into `file_managers`;
 // the selective #[path] inclusion that lived here became unnecessary once
 // the module gained a real home in the library.
-use subx_core::test_support::file_managers::TestFileManager;
 use std::sync::Arc;
 use subx_core::config::{
     ConfigService, ProductionConfigService, TestConfigBuilder, TestEnvironmentProvider,
 };
+use subx_core::test_support::file_managers::TestFileManager;
 use toml;
 
 /// Test loading configuration from a custom file

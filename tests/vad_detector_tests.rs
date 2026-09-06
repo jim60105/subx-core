@@ -3,7 +3,6 @@
 // Following the testing guidelines in `docs/testing-guidelines.md`,
 // these tests use real assets and focus on the core speech detection logic.
 
-
 use std::path::Path;
 use subx_core::config::VadConfig;
 use subx_core::core::formats::{Subtitle, SubtitleFormatType, SubtitleMetadata};
