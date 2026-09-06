@@ -28,7 +28,12 @@ exclude = [
 ]
 
 [package.metadata.docs.rs]
-all-features = true
+# Deliberately NOT all-features: activating `test-support` would present
+# ~1,930 LOC of relocated test scaffolding (subx_core::test_support::*) as
+# documented public API and pull wiremock/hound into the documentation
+# build. `archive-rar` is the only feature meant to appear in the public
+# docs. See refresh-docs-for-two-crate-architecture design.md Decision 5.
+features = ["archive-rar"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 # 'slow-tests' gates long-running format round-trip tests;

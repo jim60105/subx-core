@@ -50,8 +50,10 @@ presentation code.
 Its two consumers are [`subx-cli`](https://github.com/jim60105/subx-cli),
 the command-line front-end (which mounts this repository as a git submodule
 and re-exports it), and the Tauri GUI at
-[`jim60105/subx`](https://github.com/jim60105/subx), which depends on the
-published crate. A library consumer SHALL depend on `subx-core` directly,
+[`jim60105/subx`](https://github.com/jim60105/subx), which depends on this
+crate directly (through its repository until the first crates.io release
+lands, through the registry after). A library consumer SHALL depend on
+`subx-core` directly,
 never on `subx-cli`. A standalone clone of this repository is a supported
 workflow — it is exactly how crates.io, docs.rs, and the GUI consume the
 crate — so nothing in this repository may depend on living inside the
