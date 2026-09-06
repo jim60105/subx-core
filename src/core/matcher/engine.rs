@@ -16,6 +16,7 @@ use crate::services::ai::{AIProvider, AnalysisRequest, ContentSample, MatchResul
 use std::path::PathBuf;
 
 use crate::Result;
+use crate::core::input::CollectedFiles;
 use crate::core::language::LanguageDetector;
 use crate::core::matcher::cache::{CacheData, OpItem, SnapshotItem};
 use crate::core::matcher::discovery::generate_file_id;
@@ -24,6 +25,7 @@ use crate::core::matcher::journal::{
 };
 use crate::core::matcher::{FileDiscovery, MediaFile, MediaFileType};
 use crate::core::parallel::{FileProcessingTask, ProcessingOperation, Task, TaskResult};
+use crate::core::report::ProgressEvent;
 use crate::core::uuidv7::Uuidv7Generator;
 use crate::error::SubXError;
 use dirs;
@@ -118,15 +120,18 @@ pub(crate) fn normalize_ai_language(detector: &LanguageDetector, raw: &str) -> O
 /// Globally enforce unique final target paths across a batch of
 /// [`MatchOperation`] values.
 ///
-/// Run **after** any post-engine relocation rewrites (e.g.
-/// `match_command.rs` archive-origin forced relocation) so the
-/// uniqueness guarantee holds at the actual destination paths. The
+/// Run **after** [`apply_archive_origin_relocation`] (and any other
+/// post-engine relocation rewrites) so the uniqueness guarantee holds at
+/// the actual destination paths — the allocator's guarantee is about final
+/// destinations, not pre-rewrite candidates. The
 /// allocator iterates operations sorted by `(target_directory,
 /// subtitle_file.relative_path)` for stability across reruns and
 /// probes `<base>.<n>.<ext>` (preserving any language segment) starting
 /// at `n = 2` until a free path is found, mutating both
 /// `new_subtitle_name` and `relocation_target_path` so downstream
 /// consumers see consistent values.
+///
+/// See [`apply_archive_origin_relocation`] for the required call order.
 ///
 /// # Arguments
 ///
@@ -256,6 +261,73 @@ pub fn apply_unique_target_paths(operations: &mut [MatchOperation]) {
     }
 }
 
+/// Force subtitles extracted from an archive to copy beside their matched
+/// video's directory.
+///
+/// A subtitle whose [`CollectedFiles::archive_origin`] is set lives in a
+/// temporary extraction directory that is deleted when the
+/// [`CollectedFiles`] is dropped, so an in-place rename would write into a
+/// location that is about to disappear. For every operation whose subtitle
+/// has an archive origin and which does **not** already require relocation
+/// (a caller-chosen `--copy`/`--move` already owns that operation's
+/// relocation fields), this rewrites `relocation_target_path` to the
+/// matched video's parent directory joined with `new_subtitle_name`, sets
+/// `requires_relocation` to `true`, and sets `relocation_mode` to
+/// [`FileRelocationMode::Copy`]. An operation whose video path has no
+/// parent is left untouched.
+///
+/// This function MUST be called **before** [`apply_unique_target_paths`]:
+/// the allocator's uniqueness guarantee holds at final destination paths,
+/// and the rewrite changes the destination — allocating first would
+/// guarantee uniqueness at candidates the rewrite then discards. The two
+/// functions are neighbours in this module because they are only correct
+/// in that order.
+///
+/// # Arguments
+///
+/// * `operations` - Mutable slice of operations to rewrite in place.
+/// * `collected` - The collected-file context carrying archive provenance.
+///
+/// # Examples
+///
+/// ```
+/// use std::collections::HashMap;
+/// use std::path::PathBuf;
+/// use subx_core::core::input::CollectedFiles;
+/// use subx_core::core::matcher::engine::{
+///     apply_archive_origin_relocation, apply_unique_target_paths,
+/// };
+/// # fn example(operations: &mut [subx_core::core::matcher::engine::MatchOperation]) {
+/// let mut origins = HashMap::new();
+/// origins.insert(
+///     PathBuf::from("/tmp/subx-XXXX"),
+///     PathBuf::from("/data/subs.zip"),
+/// );
+/// let collected = CollectedFiles::with_archives(
+///     vec![PathBuf::from("/tmp/subx-XXXX/movie.srt")],
+///     Vec::new(),
+///     origins,
+/// );
+/// apply_archive_origin_relocation(operations, &collected);
+/// // … and only then the allocator, so uniqueness holds at the rewritten paths:
+/// apply_unique_target_paths(operations);
+/// # }
+/// ```
+pub fn apply_archive_origin_relocation(
+    operations: &mut [MatchOperation],
+    collected: &CollectedFiles,
+) {
+    for op in operations {
+        if collected.archive_origin(&op.subtitle_file.path).is_some() && !op.requires_relocation {
+            if let Some(video_dir) = op.video_file.path.parent() {
+                op.relocation_target_path = Some(video_dir.join(&op.new_subtitle_name));
+                op.requires_relocation = true;
+                op.relocation_mode = FileRelocationMode::Copy;
+            }
+        }
+    }
+}
+
 /// File relocation mode for matched subtitle files
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileRelocationMode {
@@ -282,6 +354,16 @@ pub enum ConflictResolution {
 ///
 /// Controls various aspects of the subtitle-to-video matching process,
 /// including confidence thresholds and analysis options.
+///
+/// # Construction stability
+///
+/// Every field is public and the struct is exhaustively constructible, so
+/// adding a ninth field is a **major-version change** for every struct
+/// literal a caller writes. [`crate::core::factory::ComponentFactory::match_config`]
+/// is the route that removes that exposure for config-driven callers —
+/// mutate its return value instead of writing a literal — and once no
+/// caller writes literals, adding `#[non_exhaustive]` here becomes a
+/// cost-free tightening a future change may take.
 #[derive(Debug, Clone)]
 pub struct MatchConfig {
     /// Minimum confidence score required for a successful match (0.0 to 1.0)
@@ -855,6 +937,105 @@ mod language_name_tests {
         super::apply_unique_target_paths(&mut ops);
         assert_eq!(ops[0].new_subtitle_name, "movie.srt");
         assert_eq!(ops[1].new_subtitle_name, "movie.2.srt");
+    }
+
+    fn collected_with_origin(temp_root: &str, archive: &str) -> crate::core::input::CollectedFiles {
+        let mut origins = std::collections::HashMap::new();
+        origins.insert(PathBuf::from(temp_root), PathBuf::from(archive));
+        crate::core::input::CollectedFiles::with_archives(Vec::new(), Vec::new(), origins)
+    }
+
+    #[test]
+    fn test_archive_origin_relocation_forces_copy_into_video_dir() {
+        // Archive-extracted subtitle with no caller-chosen relocation: the
+        // rewrite targets the video's parent dir, flips requires_relocation,
+        // and pins Copy (the source would vanish with the TempDir).
+        let mut ops = vec![op(
+            "/videos",
+            "movie.srt",
+            "/tmp/subx-XXXX/movie.srt",
+            false,
+        )];
+        let collected = collected_with_origin("/tmp/subx-XXXX", "/data/subs.zip");
+        super::apply_archive_origin_relocation(&mut ops, &collected);
+        assert!(ops[0].requires_relocation);
+        assert_eq!(ops[0].relocation_mode, FileRelocationMode::Copy);
+        assert_eq!(
+            ops[0].relocation_target_path.as_ref().unwrap(),
+            &PathBuf::from("/videos/movie.srt")
+        );
+    }
+
+    #[test]
+    fn test_archive_origin_relocation_leaves_direct_subtitle_untouched() {
+        let mut ops = vec![op("/videos", "movie.srt", "/videos/movie.srt", false)];
+        let before = (
+            ops[0].requires_relocation,
+            ops[0].relocation_mode.clone(),
+            ops[0].relocation_target_path.clone(),
+        );
+        let collected = collected_with_origin("/tmp/subx-XXXX", "/data/subs.zip");
+        super::apply_archive_origin_relocation(&mut ops, &collected);
+        assert_eq!(
+            (
+                ops[0].requires_relocation,
+                ops[0].relocation_mode.clone(),
+                ops[0].relocation_target_path.clone()
+            ),
+            before
+        );
+    }
+
+    #[test]
+    fn test_archive_origin_relocation_respects_existing_relocation() {
+        // A caller-chosen --move already owns the relocation fields; the
+        // guard must not overwrite them with a Copy into the video dir.
+        let mut ops = vec![op("/videos", "movie.srt", "/tmp/subx-XXXX/movie.srt", true)];
+        ops[0].relocation_mode = FileRelocationMode::Move;
+        ops[0].relocation_target_path = Some(PathBuf::from("/elsewhere/movie.srt"));
+        let collected = collected_with_origin("/tmp/subx-XXXX", "/data/subs.zip");
+        super::apply_archive_origin_relocation(&mut ops, &collected);
+        assert_eq!(ops[0].relocation_mode, FileRelocationMode::Move);
+        assert_eq!(
+            ops[0].relocation_target_path.as_ref().unwrap(),
+            &PathBuf::from("/elsewhere/movie.srt")
+        );
+    }
+
+    #[test]
+    fn test_archive_origin_relocation_leaves_parentless_video_untouched() {
+        // A video path with no parent component cannot receive a
+        // "<video dir>/<name>" target; the if let leaves all three fields
+        // as they were.
+        let mut archive_subtitle = op("/videos", "movie.srt", "/tmp/subx-XXXX/movie.srt", false);
+        archive_subtitle.video_file.path = PathBuf::new();
+        let mut ops = vec![archive_subtitle];
+        let collected = collected_with_origin("/tmp/subx-XXXX", "/data/subs.zip");
+        super::apply_archive_origin_relocation(&mut ops, &collected);
+        assert!(!ops[0].requires_relocation);
+        assert!(ops[0].relocation_target_path.is_none());
+        assert_eq!(ops[0].relocation_mode, FileRelocationMode::None);
+    }
+
+    #[test]
+    fn test_archive_origin_relocation_before_allocator_yields_unique_targets() {
+        // The documented pairing: two archive-extracted subtitles from the
+        // SAME extraction dir matching videos in the same dir want the same
+        // rewritten destination. Rewriting first, then allocating, is what
+        // keeps the batch collision-free at final paths.
+        let mut ops = vec![
+            op("/videos", "movie.srt", "/tmp/subx-XXXX/one.srt", false),
+            op("/videos", "movie.srt", "/tmp/subx-XXXX/two.srt", false),
+        ];
+        let collected = collected_with_origin("/tmp/subx-XXXX", "/data/subs.zip");
+        super::apply_archive_origin_relocation(&mut ops, &collected);
+        super::apply_unique_target_paths(&mut ops);
+        assert_eq!(ops[0].new_subtitle_name, "movie.srt");
+        assert_eq!(ops[1].new_subtitle_name, "movie.2.srt");
+        assert_eq!(
+            ops[1].relocation_target_path.as_ref().unwrap(),
+            &PathBuf::from("/videos/movie.2.srt")
+        );
     }
 
     #[test]
@@ -1654,6 +1835,17 @@ impl MatchEngine {
         };
         let journal_file = journal_path().ok();
 
+        // Structured progress stream for the execution loop (dry-run above
+        // emits none). The non-audit loop aborts on the first failure, so it
+        // polls no cancellation: `done` counts the operations that actually
+        // completed, and the final `Finished` carries done < total whenever
+        // the loop stopped early — the stream contract explicitly blesses a
+        // `Finished` that reports an early stop. `item` is `None`: this loop
+        // has no per-unit name worth surfacing to a progress line.
+        let total = operations.len() as u64;
+        self.reporter.progress(&ProgressEvent::Started { total });
+        let mut completed: u64 = 0;
+
         let mut first_error: Option<SubXError> = None;
 
         for op in operations {
@@ -1759,7 +1951,19 @@ impl MatchEngine {
                 // leaves the on-disk journal consistent with the file system.
                 journal.save(path).await?;
             }
+
+            completed += 1;
+            self.reporter.progress(&ProgressEvent::Advanced {
+                done: completed,
+                total,
+                item: None,
+            });
         }
+
+        self.reporter.progress(&ProgressEvent::Finished {
+            done: completed,
+            total,
+        });
 
         if let Some(err) = first_error {
             return Err(err);
@@ -1813,7 +2017,37 @@ impl MatchEngine {
 
         let mut outcomes = Vec::with_capacity(operations.len());
 
+        // Structured progress stream for the audited execution loop (the
+        // dry-run branch above emits none). One `Started`, then one
+        // `Advanced` per produced outcome — applied or error-skipped, the
+        // loop never silently drops work — then exactly one `Finished`.
+        // `item` names the subtitle file whose unit just completed, the
+        // name the batch was reported under in the pre-indicatif output.
+        //
+        // Cancellation is polled here (the JSON-mode path users actually
+        // wait on): when `cancelled()` turns true the remaining operations
+        // are NOT executed; their outcome slots are padded with
+        // `{applied: false, error: None}` so the returned vector always
+        // has one entry per operation, and `Finished` carries the `done`
+        // count captured **before** padding (never done == total on a
+        // cancel) with no `Advanced` for the padded slots. Cancellation
+        // never surfaces as `Err` — the Ok return and the `applied: false`
+        // entries are how it manifests.
+        let total = operations.len() as u64;
+        self.reporter.progress(&ProgressEvent::Started { total });
+
         for op in operations {
+            if self.reporter.cancelled() {
+                let done = outcomes.len() as u64;
+                outcomes.resize_with(operations.len(), || OperationOutcome {
+                    applied: false,
+                    error: None,
+                });
+                self.reporter
+                    .progress(&ProgressEvent::Finished { done, total });
+                return Ok(outcomes);
+            }
+
             let mut backup_path: Option<PathBuf> = None;
 
             if op.relocation_mode == FileRelocationMode::Move && self.config.backup_enabled {
@@ -1827,6 +2061,11 @@ impl MatchEngine {
                     outcomes.push(OperationOutcome {
                         applied: false,
                         error: Some(operation_error_from(&err)),
+                    });
+                    self.reporter.progress(&ProgressEvent::Advanced {
+                        done: outcomes.len() as u64,
+                        total,
+                        item: Some(&op.subtitle_file.name),
                     });
                     continue;
                 }
@@ -1883,6 +2122,11 @@ impl MatchEngine {
                     applied: false,
                     error: Some(operation_error_from(&err)),
                 });
+                self.reporter.progress(&ProgressEvent::Advanced {
+                    done: outcomes.len() as u64,
+                    total,
+                    item: Some(&op.subtitle_file.name),
+                });
                 continue;
             }
 
@@ -1918,7 +2162,17 @@ impl MatchEngine {
                 applied: true,
                 error: None,
             });
+            self.reporter.progress(&ProgressEvent::Advanced {
+                done: outcomes.len() as u64,
+                total,
+                item: Some(&op.subtitle_file.name),
+            });
         }
+
+        self.reporter.progress(&ProgressEvent::Finished {
+            done: outcomes.len() as u64,
+            total,
+        });
 
         Ok(outcomes)
     }

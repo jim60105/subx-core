@@ -83,17 +83,47 @@ impl ComponentFactory {
         std::sync::Arc::clone(&self.reporter)
     }
 
-    /// Create a match engine with AI configuration.
+    /// Return the [`MatchConfig`] this factory's loaded [`Config`] implies.
     ///
-    /// Returns a properly configured MatchEngine instance using
-    /// the AI configuration section.
+    /// The returned value carries the four configuration-derived fields read
+    /// from the loaded config (`max_sample_length`, `ai_model`,
+    /// `backup_enabled`, `max_subtitle_bytes`) plus the four defaults this
+    /// factory pins for every caller: `confidence_threshold` 0.8 (the
+    /// default value, kept configurable by overriding it here rather than in
+    /// the config file), `enable_content_analysis: true`,
+    /// `relocation_mode: FileRelocationMode::None` and
+    /// `conflict_resolution: ConflictResolution::AutoRename`.
     ///
-    /// # Errors
+    /// `confidence_threshold`, `backup_enabled`, `relocation_mode` and
+    /// `conflict_resolution` are caller-controlled: every `MatchConfig`
+    /// field is public, so callers SHOULD mutate the returned value (two
+    /// lines: `let mut c = factory.match_config(); c.relocation_mode = mode;`)
+    /// instead of writing a `MatchConfig` struct literal — a literal must be
+    /// edited whenever the struct gains a ninth field, this route never
+    /// needs touching.
     ///
-    /// Returns an error if AI provider creation fails.
-    pub fn create_match_engine(&self) -> Result<MatchEngine> {
-        let ai_provider = self.create_ai_provider()?;
-        let match_config = crate::core::matcher::MatchConfig {
+    /// # Returns
+    ///
+    /// A freshly built `MatchConfig`; identical in every field to the one
+    /// [`ComponentFactory::create_match_engine`] constructs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subx_core::config::TestConfigBuilder;
+    /// use subx_core::core::ComponentFactory;
+    ///
+    /// # fn example() -> subx_core::Result<()> {
+    /// let config_service = TestConfigBuilder::new().build_service();
+    /// let factory = ComponentFactory::new(&config_service)?;
+    /// let mut match_config = factory.match_config();
+    /// match_config.confidence_threshold = 0.9;
+    /// assert_eq!(match_config.confidence_threshold, 0.9);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn match_config(&self) -> crate::core::matcher::MatchConfig {
+        crate::core::matcher::MatchConfig {
             confidence_threshold: 0.8, // Default value, can be configurable
             max_sample_length: self.config.ai.max_sample_length,
             enable_content_analysis: true,
@@ -102,8 +132,70 @@ impl ComponentFactory {
             conflict_resolution: crate::core::matcher::engine::ConflictResolution::AutoRename,
             ai_model: self.config.ai.model.clone(),
             max_subtitle_bytes: self.config.general.max_subtitle_bytes,
-        };
-        Ok(MatchEngine::new(ai_provider, match_config).with_reporter(self.reporter()))
+        }
+    }
+
+    /// Create a match engine from a caller-supplied configuration.
+    ///
+    /// Builds the AI provider exactly as every other `create_*` method does
+    /// (through [`ComponentFactory::create_ai_provider`]), uses `config`
+    /// unmodified, and attaches the factory's reporter to the produced
+    /// engine — the same propagation terms as
+    /// [`ComponentFactory::create_match_engine`].
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The match configuration to use verbatim. Prefer deriving
+    ///   it from [`ComponentFactory::match_config`] and overwriting the
+    ///   caller-controlled fields.
+    ///
+    /// # Returns
+    ///
+    /// A `MatchEngine` wired with the factory's AI provider, the supplied
+    /// config, and the factory's reporter.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if AI provider creation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subx_core::config::TestConfigBuilder;
+    /// use subx_core::core::ComponentFactory;
+    /// use subx_core::core::matcher::engine::FileRelocationMode;
+    ///
+    /// # fn example() -> subx_core::Result<()> {
+    /// let config_service = TestConfigBuilder::new().build_service();
+    /// let factory = ComponentFactory::new(&config_service)?;
+    /// // Two-line relocation-mode override:
+    /// let mut match_config = factory.match_config();
+    /// match_config.relocation_mode = FileRelocationMode::Copy;
+    /// let engine = factory.create_match_engine_with(match_config)?;
+    /// # let _ = engine;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn create_match_engine_with(
+        &self,
+        config: crate::core::matcher::MatchConfig,
+    ) -> Result<MatchEngine> {
+        let ai_provider = self.create_ai_provider()?;
+        Ok(MatchEngine::new(ai_provider, config).with_reporter(self.reporter()))
+    }
+
+    /// Create a match engine with AI configuration.
+    ///
+    /// Returns a properly configured MatchEngine instance using
+    /// the AI configuration section. Equivalent to
+    /// `create_match_engine_with(match_config())`; see
+    /// [`ComponentFactory::match_config`] for the field-by-field contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if AI provider creation fails.
+    pub fn create_match_engine(&self) -> Result<MatchEngine> {
+        self.create_match_engine_with(self.match_config())
     }
 
     /// Create a file manager with general configuration.
@@ -284,6 +376,7 @@ pub fn create_ai_provider(ai_config: &crate::config::AIConfig) -> Result<Box<dyn
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::builder::TestConfigBuilder;
     use crate::config::test_service::TestConfigService;
 
     #[test]
@@ -463,5 +556,78 @@ mod tests {
             alias_factory.create_ai_provider().is_ok(),
             "`ollama` alias must reach the local arm"
         );
+    }
+
+    fn local_factory() -> ComponentFactory {
+        let config_service = TestConfigBuilder::new()
+            .with_ai_provider("local")
+            .with_ai_model("llama3.1")
+            .with_ai_base_url("http://localhost:11434/v1")
+            .build_service();
+        ComponentFactory::new(&config_service).unwrap()
+    }
+
+    #[test]
+    fn match_config_matches_field_for_field_contract() {
+        // The field-for-field contract: config-derived fields read the
+        // loaded config; the other four are the factory's pinned defaults.
+        let factory = local_factory();
+        let config = factory.match_config();
+        assert_eq!(config.confidence_threshold, 0.8);
+        assert!(config.enable_content_analysis);
+        assert_eq!(
+            config.relocation_mode,
+            crate::core::matcher::engine::FileRelocationMode::None
+        );
+        assert!(matches!(
+            config.conflict_resolution,
+            crate::core::matcher::engine::ConflictResolution::AutoRename
+        ));
+        // Config-derived fields must mirror the loaded config the factory
+        // was built from (local provider, default general section).
+        assert_eq!(config.ai_model, "llama3.1");
+        assert_eq!(
+            config.max_sample_length,
+            crate::config::Config::default().ai.max_sample_length
+        );
+        assert_eq!(
+            config.backup_enabled,
+            crate::config::Config::default().general.backup_enabled
+        );
+        assert_eq!(
+            config.max_subtitle_bytes,
+            crate::config::Config::default().general.max_subtitle_bytes
+        );
+    }
+
+    #[test]
+    fn match_config_tracks_the_loaded_config() {
+        // A backup-enabled config must surface in match_config(): the
+        // method reads the loaded config, it does not re-derive defaults.
+        let config_service = TestConfigBuilder::new()
+            .with_ai_provider("local")
+            .with_ai_base_url("http://localhost:11434/v1")
+            .with_backup_enabled(true)
+            .with_max_sample_length(4321)
+            .build_service();
+        let factory = ComponentFactory::new(&config_service).unwrap();
+        let config = factory.match_config();
+        assert!(config.backup_enabled);
+        assert_eq!(config.max_sample_length, 4321);
+    }
+
+    #[test]
+    fn create_match_engine_uses_match_config_values() {
+        // Behavioural proof of the `new == create_match_engine_with(
+        // match_config())` identity: create_match_engine builds its engine
+        // through the same two methods, and the observable config half of
+        // that engine is exercised end-to-end in
+        // tests/factory_match_engine_tests.rs (relocation_mode reaching
+        // MatchOperation needs a wired AI client). Here, the factory path
+        // must at least construct successfully with the local provider.
+        let factory = local_factory();
+        assert!(factory.create_match_engine().is_ok());
+        let engine = factory.create_match_engine_with(factory.match_config());
+        assert!(engine.is_ok(), "{:?}", engine.err());
     }
 }

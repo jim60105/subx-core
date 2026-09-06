@@ -487,6 +487,177 @@ impl CollectedFiles {
         None
     }
 
+    /// Resolve the directory a derived output file belongs in for `input`.
+    ///
+    /// Preference order:
+    /// 1. the parent directory of the archive `input` was extracted from,
+    ///    when [`CollectedFiles::archive_origin`] is `Some` and that archive
+    ///    has a parent;
+    /// 2. `input`'s own parent — for a single-component path such as
+    ///    `movie.srt` that parent is `Path::new("")`, deliberately NOT
+    ///    normalised to `Path::new(".")`: callers join onto the returned
+    ///    directory, `""` joins to the bare name, and normalising would
+    ///    render `./movie.zh.srt` where the CLI has always printed
+    ///    `movie.zh.srt`;
+    /// 3. `Path::new(".")` only for an input with no parent component at all
+    ///    (`/`, or the empty path).
+    ///
+    /// The archive rule exists so output is never written into a temporary
+    /// extraction directory, which is deleted when this [`CollectedFiles`]
+    /// is dropped. Neither this method nor [`CollectedFiles::default_output_path`]
+    /// touches the filesystem or creates a directory.
+    ///
+    /// This query is deliberately **not** the directory half of
+    /// [`CollectedFiles::default_output_path`], and `default_output_path`
+    /// SHALL NOT be rewritten as `default_output_dir(input).join(..)`:
+    /// `default_output_path`'s non-archive half is `input.with_extension(..)`,
+    /// which preserves today's rendered paths byte-for-byte, and its archive
+    /// half resolves beside the archive — a property this directory query
+    /// shares but whose join form the command loops never used. The
+    /// rendered forms reach CLI output, so both stay verbatim copies of the
+    /// loops they came from rather than being derived from each other.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - The input path whose default output directory is wanted.
+    ///
+    /// # Returns
+    ///
+    /// The directory to place derived output in, as described above — the
+    /// empty path for a bare relative filename, joining onto which keeps the
+    /// name bare.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::HashMap;
+    /// # use std::path::PathBuf;
+    /// use std::path::Path;
+    /// use subx_core::core::input::CollectedFiles;
+    ///
+    /// // Direct input: the directory beside the input itself.
+    /// let collected = CollectedFiles::new(vec![PathBuf::from("/data/movie.srt")]);
+    /// assert_eq!(
+    ///     collected.default_output_dir(Path::new("/data/movie.srt")),
+    ///     Path::new("/data")
+    /// );
+    ///
+    /// // Archive-extracted input: the directory beside the archive.
+    /// let mut origins = HashMap::new();
+    /// origins.insert(
+    ///     PathBuf::from("/tmp/subx-XXXX"),
+    ///     PathBuf::from("/data/subs.zip"),
+    /// );
+    /// let collected = CollectedFiles::with_archives(Vec::new(), Vec::new(), origins);
+    /// assert_eq!(
+    ///     collected.default_output_dir(Path::new("/tmp/subx-XXXX/movie.srt")),
+    ///     Path::new("/data")
+    /// );
+    ///
+    /// // Bare relative input: the empty path (Path::parent of a
+    /// // single-component path is Some("")) — joining keeps the name bare,
+    /// // where normalising to "." would render "./movie.zh.srt".
+    /// let collected = CollectedFiles::new(vec![PathBuf::from("movie.srt")]);
+    /// assert_eq!(collected.default_output_dir(Path::new("movie.srt")), Path::new(""));
+    /// assert_eq!(
+    ///     collected.default_output_dir(Path::new("movie.srt")).join("movie.zh.srt"),
+    ///     PathBuf::from("movie.zh.srt")
+    /// );
+    ///
+    /// // A path with no parent component at all falls back to ".".
+    /// assert_eq!(collected.default_output_dir(Path::new("/")), Path::new("."));
+    /// ```
+    pub fn default_output_dir<'a>(&'a self, input: &'a Path) -> &'a Path {
+        self.archive_origin(input)
+            .and_then(Path::parent)
+            .or_else(|| input.parent())
+            .unwrap_or(Path::new("."))
+    }
+
+    /// Resolve the default output path for converting `input` to `extension`.
+    ///
+    /// - When `input` was extracted from an archive: the archive's parent
+    ///   directory (or `Path::new(".")` when the archive has no parent)
+    ///   joined with `<stem>.<extension>`, where `<stem>` is `input`'s file
+    ///   stem or the literal `output` when it has none.
+    /// - Otherwise: `input.with_extension(extension)`.
+    ///
+    /// The archive rule exists so converted output is never written into a
+    /// temporary extraction directory, which is deleted when this
+    /// [`CollectedFiles`] is dropped. Neither this method nor
+    /// [`CollectedFiles::default_output_dir`] touches the filesystem or
+    /// creates a directory.
+    ///
+    /// This resolver is deliberately **not**
+    /// `default_output_dir(input).join(name)`, and SHALL NOT be rewritten
+    /// that way: its two arms are verbatim copies of the loop
+    /// `subx convert` has always run, and `convert` prints the resolved
+    /// path — byte-compatibility with that printed text is the contract.
+    /// (The hazard that makes the distinction load-bearing in the other
+    /// direction lives in [`CollectedFiles::default_output_dir`]:
+    /// normalising its single-component-path result from `Path::new("")` to
+    /// `Path::new(".")` would render `./movie.vtt` where the CLI prints
+    /// `movie.vtt`.)
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - The input path being converted.
+    /// * `extension` - Target format extension (e.g. `"vtt"`).
+    ///
+    /// # Returns
+    ///
+    /// The default output path, as described above — byte-compatible with
+    /// the path `subx convert` prints when no `--output` is given.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::HashMap;
+    /// # use std::path::PathBuf;
+    /// use std::path::Path;
+    /// use subx_core::core::input::CollectedFiles;
+    ///
+    /// // Archive-extracted input resolves beside the archive, not inside
+    /// // the extraction directory:
+    /// let mut origins = HashMap::new();
+    /// origins.insert(
+    ///     PathBuf::from("/tmp/subx-XXXX"),
+    ///     PathBuf::from("/data/subs.zip"),
+    /// );
+    /// let collected = CollectedFiles::with_archives(Vec::new(), Vec::new(), origins);
+    /// assert_eq!(
+    ///     collected.default_output_path(Path::new("/tmp/subx-XXXX/movie.srt"), "vtt"),
+    ///     Path::new("/data/movie.vtt")
+    /// );
+    ///
+    /// // Direct input keeps `with_extension` semantics — note the bare
+    /// // relative form renders `movie.vtt`, deliberately not `./movie.vtt`
+    /// // (which is what the forbidden join-over-"." rewrite would print):
+    /// let collected = CollectedFiles::new(Vec::new());
+    /// assert_eq!(
+    ///     collected.default_output_path(Path::new("movie.srt"), "vtt"),
+    ///     Path::new("movie.vtt")
+    /// );
+    /// assert_eq!(
+    ///     collected.default_output_path(Path::new("/data/movie.srt"), "vtt"),
+    ///     Path::new("/data/movie.vtt")
+    /// );
+    /// ```
+    pub fn default_output_path(&self, input: &Path, extension: &str) -> PathBuf {
+        match self.archive_origin(input) {
+            Some(archive) => {
+                // File came from an archive: write output beside the archive
+                let archive_dir = archive.parent().unwrap_or(Path::new("."));
+                let stem = input
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("output");
+                archive_dir.join(format!("{stem}.{extension}"))
+            }
+            None => input.with_extension(extension),
+        }
+    }
+
     /// Consumes self and returns the collected paths.
     ///
     /// **Warning:** This drops the `TempDir` handles, so any paths pointing
@@ -507,6 +678,122 @@ impl std::ops::Deref for CollectedFiles {
 impl AsRef<[PathBuf]> for CollectedFiles {
     fn as_ref(&self) -> &[PathBuf] {
         &self.paths
+    }
+}
+
+#[cfg(test)]
+mod output_location_tests {
+    use super::*;
+
+    fn archive_collected(temp_root: &str, archive: &str) -> CollectedFiles {
+        let mut origins = HashMap::new();
+        origins.insert(PathBuf::from(temp_root), PathBuf::from(archive));
+        CollectedFiles::with_archives(Vec::new(), Vec::new(), origins)
+    }
+
+    #[test]
+    fn output_path_resolves_archive_extracted_input_beside_the_archive() {
+        let collected = archive_collected("/tmp/subx-XXXX", "/data/subs.zip");
+        assert_eq!(
+            collected.default_output_path(Path::new("/tmp/subx-XXXX/movie.srt"), "vtt"),
+            PathBuf::from("/data/movie.vtt")
+        );
+    }
+
+    #[test]
+    fn output_path_resolves_direct_input_beside_itself() {
+        let collected = CollectedFiles::new(Vec::new());
+        assert_eq!(
+            collected.default_output_path(Path::new("/data/movie.srt"), "vtt"),
+            PathBuf::from("/data/movie.vtt")
+        );
+    }
+
+    #[test]
+    fn output_path_bare_relative_input_is_bare_not_dot_prefixed() {
+        // The exact rendering `subx convert movie.srt` prints — the
+        // forbidden join-over-"." rewrite would produce "./movie.vtt".
+        let collected = CollectedFiles::new(Vec::new());
+        let resolved = collected.default_output_path(Path::new("movie.srt"), "vtt");
+        assert_eq!(resolved, PathBuf::from("movie.vtt"));
+        assert!(!resolved.display().to_string().starts_with("./"));
+    }
+
+    #[test]
+    fn output_path_archive_without_parent_falls_back_to_dot() {
+        // `Path::new("subs.zip").parent()` is Some(""), so a relative
+        // archive resolves through the EMPTY path and joins to the bare
+        // name — the `unwrap_or(".")` fallback is only reachable for a
+        // literally-empty archive path, which no collection produces.
+        // Both forms are pinned here, verbatim-loop behaviour.
+        let collected = archive_collected("/tmp/subx-XXXX", "subs.zip");
+        assert_eq!(
+            collected.default_output_path(Path::new("/tmp/subx-XXXX/movie.srt"), "vtt"),
+            PathBuf::from("movie.vtt")
+        );
+        let collected = archive_collected("/tmp/subx-XXXX", "");
+        assert_eq!(
+            collected.default_output_path(Path::new("/tmp/subx-XXXX/movie.srt"), "vtt"),
+            PathBuf::from("./movie.vtt")
+        );
+    }
+
+    #[test]
+    fn output_path_extensionless_extracted_input_falls_back_to_output_stem() {
+        // Defensive fallback pinned verbatim from convert's loop: an entry
+        // with no file stem (only reachable for degenerate paths such as
+        // the root) uses the literal `output`.
+        let mut origins = HashMap::new();
+        origins.insert(PathBuf::from("/"), PathBuf::from("/data/subs.zip"));
+        let collected = CollectedFiles::with_archives(Vec::new(), Vec::new(), origins);
+        assert_eq!(
+            collected.default_output_path(Path::new("/"), "vtt"),
+            PathBuf::from("/data/output.vtt")
+        );
+    }
+
+    #[test]
+    fn output_dir_prefers_archive_parent_then_input_parent_then_empty() {
+        // Archive wins over the extraction directory.
+        let collected = archive_collected("/tmp/subx-XXXX", "/data/subs.zip");
+        assert_eq!(
+            collected.default_output_dir(Path::new("/tmp/subx-XXXX/movie.srt")),
+            Path::new("/data")
+        );
+        // No archive: the input's own directory.
+        let collected = CollectedFiles::new(Vec::new());
+        assert_eq!(
+            collected.default_output_dir(Path::new("/data/movie.srt")),
+            Path::new("/data")
+        );
+        // Single-component input: Path::parent is Some(""), NOT normalised
+        // to "." — joining onto it keeps the name bare (Decision 3's
+        // byte-compatibility contract).
+        assert_eq!(
+            collected.default_output_dir(Path::new("movie.srt")),
+            Path::new("")
+        );
+        assert_eq!(
+            collected
+                .default_output_dir(Path::new("movie.srt"))
+                .join("movie.zh.srt"),
+            PathBuf::from("movie.zh.srt")
+        );
+        // No parent component at all: the "." fallback.
+        assert_eq!(collected.default_output_dir(Path::new("/")), Path::new("."));
+    }
+
+    #[test]
+    fn output_dir_relative_archive_yields_empty_path_not_fallthrough() {
+        // A relative archive yields Some("") through the chain — NOT a
+        // fall-through to the extraction directory: Some("") is Some, and
+        // joining onto it keeps the derived name bare, which is what
+        // translate's own base-directory chain always produced.
+        let collected = archive_collected("/tmp/subx-XXXX", "subs.zip");
+        assert_eq!(
+            collected.default_output_dir(Path::new("/tmp/subx-XXXX/movie.srt")),
+            Path::new("")
+        );
     }
 }
 

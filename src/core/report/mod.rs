@@ -112,6 +112,27 @@ pub trait Reporter: Send + Sync {
     fn progress(&self, event: &ProgressEvent<'_>) {
         let _ = event;
     }
+
+    /// Whether the operation being reported should stop early.
+    ///
+    /// A long-running loop polls this between units of work — never inside
+    /// one — and closes its progress stream cleanly when it turns `true`.
+    /// Cancellation never surfaces as an `Err`: the loop finishes what it
+    /// has done, reports the shortfall through
+    /// [`ProgressEvent::Finished`] (`done < total`), and returns normally
+    /// (see the `expose-core-orchestration-apis` audit-loop contract). A
+    /// caller that wants a mid-await stop drops the future instead.
+    ///
+    /// The default is `false`: reporters that do not implement this —
+    /// including [`NoopReporter`] and the terminal reporter — make every
+    /// loop run to completion, exactly as before this method existed.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the driver has asked for an early stop.
+    fn cancelled(&self) -> bool {
+        false
+    }
 }
 
 /// The default [`Reporter`]: silently swallows everything.
@@ -187,21 +208,46 @@ pub struct AiUsage {
 
 /// An event on the long-running-work progress stream.
 ///
-/// Today this covers free-form status chatter emitted while long work
-/// advances: worker-pool drain notices, per-batch translation progress,
-/// and retry notices. The enum is `#[non_exhaustive]` so
-/// `expose-core-orchestration-apis` (D2) can add structured variants
-/// (started / advanced / finished, cancellation) without a breaking
-/// change; every consumer `match` therefore needs a wildcard arm.
+/// Covers free-form status chatter emitted while long work advances
+/// ([`ProgressEvent::Message`]: worker-pool drain notices, per-batch
+/// translation progress, retry notices) and the structured unit-counted
+/// stream (`Started` / `Advanced` / `Finished`) opened by loops that know
+/// their work in advance.
+///
+/// # Stream contract
+///
+/// A structured stream is exactly one [`ProgressEvent::Started`], zero or
+/// more [`ProgressEvent::Advanced`], and exactly one
+/// [`ProgressEvent::Finished`]. `Advanced.done` is non-decreasing and never
+/// exceeds `total`; a `Finished` with `done < total` means the stream
+/// stopped early (cancellation or a first-error abort). A reporter keeps at
+/// most **one open stream at a time**: a second `Started` replaces the
+/// current stream rather than nesting a second one.
+///
+/// The enum stays `#[non_exhaustive]` so future variants remain a
+/// minor-version event; every consumer `match` therefore needs a wildcard
+/// arm.
 ///
 /// # Examples
 ///
 /// ```
 /// use subx_core::core::report::ProgressEvent;
 ///
-/// let event = ProgressEvent::Message("📊 Translation Progress:\n   Processed cues: 2/2");
-/// match &event {
-///     ProgressEvent::Message(message) => assert!(message.starts_with("📊")),
+/// let stream = [
+///     ProgressEvent::Started { total: 2 },
+///     ProgressEvent::Advanced { done: 1, total: 2, item: Some("movie.srt") },
+///     ProgressEvent::Finished { done: 2, total: 2 },
+/// ];
+/// match &stream[1] {
+///     ProgressEvent::Advanced { done, total, item } => {
+///         assert_eq!((*done, *total), (1, 2));
+///         assert_eq!(*item, Some("movie.srt"));
+///     }
+///     _ => unreachable!("second event is an Advanced"),
+/// }
+/// // A cancelled or first-error-aborted stream closes with done < total:
+/// match (ProgressEvent::Finished { done: 1, total: 2 }) {
+///     ProgressEvent::Finished { done, total } => assert!(done < total),
 ///     _ => {}
 /// }
 /// ```
@@ -210,6 +256,41 @@ pub struct AiUsage {
 pub enum ProgressEvent<'a> {
     /// Free-form status line emitted while long-running work advances.
     Message(&'a str),
+    /// A unit-counted stream is opening; `total` is the number of units.
+    ///
+    /// `total: 0` is a real stream, not an absence of one: the batch was
+    /// empty, and a renderer still gets an open-and-close signal.
+    Started {
+        /// Number of units the stream will advance through.
+        total: u64,
+    },
+    /// `done` of `total` units are complete.
+    ///
+    /// # Arguments
+    ///
+    /// * `item` - Name of the unit that just completed, when the emitter
+    ///   has one to hand out (the audit loop names the subtitle file; a
+    ///   completion counter with no natural per-unit name passes `None`).
+    Advanced {
+        /// Units completed so far; non-decreasing, never above `total`.
+        done: u64,
+        /// Total units the opening `Started` announced.
+        total: u64,
+        /// The unit that just completed, when it has a name.
+        item: Option<&'a str>,
+    },
+    /// The stream is closing; `done < total` means it stopped early.
+    ///
+    /// Stopping early is a normal close, not a failure: cancellation and
+    /// first-error aborts both end their streams this way. A failure of the
+    /// operation itself is carried by the return value, never by a progress
+    /// event.
+    Finished {
+        /// Units actually completed before the stream closed.
+        done: u64,
+        /// Total units the opening `Started` announced.
+        total: u64,
+    },
 }
 
 /// `dyn Reporter` crosses thread boundaries inside engines; pin the bound.
@@ -252,8 +333,8 @@ mod tests {
             ));
         }
         fn progress(&self, event: &ProgressEvent<'_>) {
-            // Wildcard keeps the double compiling when non_exhaustive
-            // variants land (statically unreachable today).
+            // All four real variants are named; the wildcard stays for
+            // future non_exhaustive additions.
             #[allow(unreachable_patterns)]
             match event {
                 ProgressEvent::Message(message) => {
@@ -261,6 +342,24 @@ mod tests {
                         .lock()
                         .unwrap()
                         .push(format!("progress:{message}"));
+                }
+                ProgressEvent::Started { total } => {
+                    self.events
+                        .lock()
+                        .unwrap()
+                        .push(format!("progress:started:{total}"));
+                }
+                ProgressEvent::Advanced { done, total, item } => {
+                    self.events.lock().unwrap().push(format!(
+                        "progress:advanced:{done}/{total}:{}",
+                        item.unwrap_or("-")
+                    ));
+                }
+                ProgressEvent::Finished { done, total } => {
+                    self.events
+                        .lock()
+                        .unwrap()
+                        .push(format!("progress:finished:{done}/{total}"));
                 }
                 _ => self.events.lock().unwrap().push("progress:_".to_string()),
             }
@@ -332,6 +431,129 @@ mod tests {
         };
         assert_eq!(text, "status");
         assert_eq!(event, ProgressEvent::Message("status"));
+    }
+
+    #[test]
+    fn structured_variants_record_and_compare_by_value() {
+        // Eq across every field (u64 / Option<&str>) — the derive A1 pinned
+        // must survive the variants D2 adds (cargo-semver-checks reads a
+        // removed derive as major).
+        assert_eq!(
+            ProgressEvent::Advanced {
+                done: 1,
+                total: 2,
+                item: Some("a.srt")
+            },
+            ProgressEvent::Advanced {
+                done: 1,
+                total: 2,
+                item: Some("a.srt")
+            }
+        );
+        assert_ne!(
+            ProgressEvent::Advanced {
+                done: 1,
+                total: 2,
+                item: Some("a.srt")
+            },
+            ProgressEvent::Advanced {
+                done: 2,
+                total: 2,
+                item: Some("a.srt")
+            }
+        );
+        assert_eq!(
+            ProgressEvent::Started { total: 0 },
+            ProgressEvent::Started { total: 0 }
+        );
+        assert_ne!(
+            ProgressEvent::Finished { done: 1, total: 2 },
+            ProgressEvent::Finished { done: 2, total: 2 }
+        );
+
+        let reporter = RecordingReporter::default();
+        reporter.progress(&ProgressEvent::Started { total: 2 });
+        reporter.progress(&ProgressEvent::Advanced {
+            done: 1,
+            total: 2,
+            item: Some("a.srt"),
+        });
+        reporter.progress(&ProgressEvent::Advanced {
+            done: 2,
+            total: 2,
+            item: None,
+        });
+        reporter.progress(&ProgressEvent::Finished { done: 2, total: 2 });
+        assert_eq!(
+            reporter.recorded(),
+            vec![
+                "progress:started:2",
+                "progress:advanced:1/2:a.srt",
+                "progress:advanced:2/2:-",
+                "progress:finished:2/2",
+            ]
+        );
+    }
+
+    #[test]
+    fn four_variant_match_with_wildcard_compiles() {
+        // The spec-mandated consumer shape: every real variant named plus
+        // `_` for future non_exhaustive additions.
+        let events = [
+            ProgressEvent::Message("m"),
+            ProgressEvent::Started { total: 1 },
+            ProgressEvent::Advanced {
+                done: 1,
+                total: 1,
+                item: None,
+            },
+            ProgressEvent::Finished { done: 1, total: 1 },
+        ];
+        #[allow(unreachable_patterns)]
+        let kinds: Vec<&str> = events
+            .iter()
+            .map(|event| match event {
+                ProgressEvent::Message(_) => "message",
+                ProgressEvent::Started { .. } => "started",
+                ProgressEvent::Advanced { .. } => "advanced",
+                ProgressEvent::Finished { .. } => "finished",
+                _ => "unknown",
+            })
+            .collect();
+        assert_eq!(kinds, ["message", "started", "advanced", "finished"]);
+    }
+
+    #[test]
+    fn cancelled_defaults_to_false_for_non_implementors() {
+        // Noop and the plain handle: never cancel.
+        assert!(!noop().cancelled());
+        assert!(!NoopReporter.cancelled());
+        // A reporter opting into exactly one channel still gets the
+        // provided default: `cancelled` must not force implementors out
+        // of their silence.
+        struct WarnOnly;
+        impl Reporter for WarnOnly {
+            fn warn(&self, _message: &str) {}
+        }
+        assert!(!WarnOnly.cancelled());
+    }
+
+    #[test]
+    fn cancelled_override_is_observable_through_the_trait_object() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Cancellable(AtomicBool);
+        impl Reporter for Cancellable {
+            fn cancelled(&self) -> bool {
+                self.0.load(Ordering::SeqCst)
+            }
+        }
+        let reporter = Cancellable(AtomicBool::new(false));
+        assert!(!reporter.cancelled());
+        reporter.0.store(true, Ordering::SeqCst);
+        assert!(reporter.cancelled());
+        // Same answer through Arc<dyn Reporter>, as engines hold it.
+        let owned: Arc<dyn Reporter> = Arc::new(Cancellable(AtomicBool::new(true)));
+        assert!(owned.cancelled());
     }
 
     #[test]
