@@ -69,7 +69,7 @@ modes working:
   member and warns on every build when one is present. Release/dev profiles
   live in `subx-cli/Cargo.toml` only.
 - **Every configuration file is this repository's own.** `.gitignore`,
-  `.gitattributes`, `rustfmt.toml`, `.config/nextest.toml`, `.llvm-cov.toml`,
+  `.gitattributes`, `rustfmt.toml`, `.config/nextest.toml`,
   `.codegraph/.gitignore`, `LICENSE`, and the committed `Cargo.lock` apply to
   a standalone clone; the parent repository's copies never reach inside a
   submodule.
@@ -103,13 +103,15 @@ Two rules fall out of this:
   tests that drive core code from the other repository do not exist in this
   one, so a standalone gate must never borrow a workspace-derived floor — it
   needs a measurement of a standalone run (the percentage this job uploads to
-  codecov), which nobody has made yet.
+  codecov). The first such measurement is recorded in `CHANGELOG.md`:
+  **90.62%** lines (19,028/20,998, single instrumented `ci`-profile run).
 
-`.github/workflows/release.yml` exists so publication *can* be wired to a
-`v*` tag later, but **nothing in this change publishes from it** — crates.io
-publication goes through `subx-cli`'s `publish-crates` job (a single
-`cargo publish --workspace`), and this repository's release workflow is not
-triggered by C1 in any way.
+There is no release workflow in this repository and none is planned: this
+repository contains only `build-test-audit-coverage.yml`. crates.io
+publication happens exclusively from `subx-cli`'s `publish-crates` job (a
+single `cargo publish --workspace` triggered by a `subx-cli` `v*` tag, whose
+`Assert the submodule pointer is on subx-core main` step makes a push of this
+repository's `main` a precondition of any release).
 
 ## Module Guide
 
