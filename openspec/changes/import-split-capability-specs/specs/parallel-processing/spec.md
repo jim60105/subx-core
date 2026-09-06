@@ -1,5 +1,14 @@
 ## ADDED Requirements
 
+### Requirement: Task Scheduler Entry Point
+
+The system SHALL expose `TaskScheduler::new()` as the primary entry point for batch execution, and the scheduler SHALL accept a collection of boxed `Task + Send + Sync` values and return a corresponding `Vec<TaskResult>`. The task-count reporting and the empty-input early return of `subx-cli`'s match command are specified by the `parallel-processing` capability's *Parallel Match Reports Task Count and Handles an Empty Input Set* requirement in `subx-cli`.
+
+#### Scenario: Parallel match over a directory
+- **GIVEN** a directory containing N video files and `subx-cli`'s match command using the parallel execution path
+- **WHEN** the scheduler runs the generated `FileProcessingTask` set
+- **THEN** each video SHALL be processed by the scheduler
+
 ### Requirement: Bounded Concurrency
 
 The system SHALL limit the number of concurrently running tasks to the active worker count configured from `config.parallel`, preventing unbounded task fan-out.

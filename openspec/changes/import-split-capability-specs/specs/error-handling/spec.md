@@ -42,6 +42,17 @@ The system SHALL preserve causal chains via `std::error::Error::source()`. Varia
 - **WHEN** a caller inspects `std::error::Error::source()` on the error
 - **THEN** the returned reference SHALL be the wrapped `std::io::Error`
 
+### Requirement: Display Is the Library's Error Rendering
+
+`SubXError::Display` (derived via `thiserror`) SHALL produce a concise single-line English message prefixed by the error category. `Display` is an inherent, library-side capability of `SubXError`, available to any caller without importing a trait. All messages and prefixes SHALL be written in English — the same English-language rule the `subx-cli` half states for its presentation layer; it is a project-wide editorial constraint rather than an obligation on a particular function, and it is deliberately stated in both halves.
+
+The multi-line, hinted rendering — the `Hint:` line and the remediation prose — is `subx-cli`'s presentation contract, specified by the `error-handling` capability's *User-Facing Error Formatting* and *Binary Error Surface Adds Presentation Through an Extension Trait* requirements there.
+
+#### Scenario: Display is a single-line English message
+- **GIVEN** `SubXError::subtitle_format("SRT", "invalid timestamp")`
+- **WHEN** `to_string()` is called
+- **THEN** the output SHALL equal `Subtitle format error [SRT]: invalid timestamp` with no embedded newline
+
 ### Requirement: API Error Source Enumeration
 
 Errors originating from external HTTP APIs SHALL be modelled as `SubXError::Api { message, source: ApiErrorSource }` where `ApiErrorSource` distinguishes at least `OpenAI` and `Whisper`. The helper `SubXError::whisper_api(msg)` SHALL produce an `Api` variant whose source is `ApiErrorSource::Whisper`, and both `Api` and `AiService` SHALL share the `api` and `ai_service` categories' process exit code; the numeric mapping itself is specified by this capability's *Process Exit Code Mapping* requirement in `subx-cli`, which maps both categories to the same code.
@@ -50,6 +61,17 @@ Errors originating from external HTTP APIs SHALL be modelled as `SubXError::Api 
 - **GIVEN** `SubXError::whisper_api("rate limited")`
 - **WHEN** the variant is inspected
 - **THEN** it SHALL match `SubXError::Api { source: ApiErrorSource::Whisper, .. }`, and `exit_code()` — `subx-cli`'s extension-trait method per this capability's *Process Exit Code Mapping* requirement there — SHALL return the code that requirement maps for the `api` category (`3`)
+
+### Requirement: Library Code Surfaces Recoverable Failures as Errors
+
+Library code SHALL NOT panic, `unwrap`, or `expect` on conditions that represent user-facing recoverable failures (invalid configuration, missing or unreadable files, unsupported formats, network failures, AI response errors, empty inputs, etc.); every such failure SHALL instead be returned as an appropriately typed `SubXError`. The configuration loader (`src/config/`) and the match engine (`src/core/matcher/`) SHALL both surface invalid input through `SubXError::Config` / `SubXError::FileMatching` rather than aborting, as verified by `tests/config_validation_tests.rs` and `tests/match_engine_error_display_integration_tests.rs`.
+
+The equivalent obligation on `subx-cli`'s command entry points — that subcommands SHALL NOT panic and SHALL propagate typed errors to the process entry point, verified there by `subx-cli:tests/match_engine_error_handling_integration_tests.rs` — is specified by the `error-handling` capability's *No Panics On Recoverable Errors* requirement in `subx-cli`.
+
+#### Scenario: Invalid configuration value is reported, not panicked
+- **GIVEN** a configuration value that fails validation (e.g. out-of-range `sync.vad.sensitivity`)
+- **WHEN** validation runs
+- **THEN** the code path SHALL return `Err(SubXError::Config { .. })` and the code SHALL NOT unwind via panic
 
 ### Requirement: Sanitized upstream error messages
 
@@ -107,3 +129,29 @@ Because these three are the contract consumed by non-terminal front ends, they S
 - **WHEN** it calls `err.hint()`
 - **THEN** the call SHALL compile and SHALL return `Some(_)` for exactly the variants that returned `Some(_)` before the split
 
+### Requirement: Library Error Surface Holds Only Machine Contracts
+
+The library half of the `SubXError` surface SHALL hold the machine contracts and nothing else: the enum itself and all of its variants, every `From` conversion, every helper constructor, and `ApiErrorSource`; `category()`, `machine_code()`, and `hint()`. `Display` is unchanged by the surface split: every message, prefix, and newline is byte-identical to the pre-split rendering.
+
+Additional constraints:
+
+- Code under `src/core/` and `src/services/` SHALL NOT call `exit_code()` or `user_friendly_message()`, and SHALL NOT import `SubXErrorExt` (defined at `subx-cli:src/cli/error_ext.rs`). Where such code needs a rendered message it SHALL use `Display` (`to_string()`), optionally combined with `hint()`.
+- `hint()` SHALL remain an inherent method on `SubXError` even though its returned prose names the `subx-cli` binary and its flags. Its rustdoc SHALL record that the text is written for the terminal, that library consumers should treat the return value as an availability signal rather than display copy, and that the identity of the variants returning `Some` is the stable part of the contract.
+- The `OutputModeUnsupported` variant SHALL remain a variant of the core enum even though only the binary constructs it, so that `category()` and `machine_code()` keep their wildcard-free exhaustive matches. Its rustdoc SHALL record that only the binary constructs it.
+
+The binary half — `SubXErrorExt` with its two methods, their unchanged bodies so that no exit code, message, prefix, or `Hint:` line differs from before the split, and the trait import sites — is specified by the `error-handling` capability's *Binary Error Surface Adds Presentation Through an Extension Trait* requirement in `subx-cli`.
+
+#### Scenario: Machine contracts need no import
+- **GIVEN** any module holding a `SubXError` value, with no trait imported
+- **WHEN** it calls `err.category()`, `err.machine_code()`, or `err.hint()`
+- **THEN** all three calls SHALL compile and SHALL return the same values as before the split
+
+#### Scenario: Core does not depend on presentation
+- **GIVEN** the source trees `src/core/` and `src/services/`
+- **WHEN** they are searched for `SubXErrorExt`, `exit_code`, and `user_friendly_message`
+- **THEN** there SHALL be no call site and no import of any of them
+
+#### Scenario: Core renders operation errors through Display
+- **GIVEN** the audit path in `src/core/matcher/engine.rs` that turns a failed file operation into per-operation error metadata
+- **WHEN** it renders the error's `message` field
+- **THEN** it SHALL use the error's `Display` output, and for the only variant it constructs — `SubXError::FileOperationFailed` — that output SHALL be byte-identical to `user_friendly_message()`, preserving the per-item message contract of the `machine-readable-output` capability in `subx-cli`

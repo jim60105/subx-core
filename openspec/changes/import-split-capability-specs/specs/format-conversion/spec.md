@@ -1,5 +1,14 @@
 ## ADDED Requirements
 
+### Requirement: Target Format Conversion Semantics
+
+The system SHALL produce, for each supported output format, the file shape that format's specification requires, and the produced file extension SHALL match the selected format. The `--format` value surface and the configuration default are `subx-cli`'s, specified by the `format-conversion` capability's *Supported Output Formats* requirement there.
+
+#### Scenario: Convert SRT to VTT
+- **GIVEN** an input SRT file and the VTT output format
+- **WHEN** the conversion runs
+- **THEN** the output file SHALL contain a `WEBVTT` header and SRT-style comma timecodes SHALL be converted to dot timecodes (for example `00:00:01.000 --> 00:00:02.000`)
+
 ### Requirement: File size check before parsing
 
 Before reading a subtitle file for format conversion, the system SHALL check the file size against the configured `general.max_subtitle_bytes` limit. If the file exceeds the limit, the system SHALL return an error without reading the file, preventing unbounded memory allocation from malicious or malformed oversized inputs.

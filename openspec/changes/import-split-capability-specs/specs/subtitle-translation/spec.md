@@ -190,6 +190,27 @@ for AI requests and SHALL reassemble translated entries in their original order.
 - **AND** SHALL NOT write an output file containing only the first batch
   translations
 
+### Requirement: Translation Prompt Guidance Inputs
+
+The translation engine SHALL accept optional caller-supplied guidance — a source language, glossary entries, and inline context — and SHALL include it in the translation prompt as terminology and tone guidance without changing subtitle timing or file discovery behavior. Inline context SHALL be treated as prompt text and SHALL NOT be interpreted as a filesystem path. An omitted source language SHALL produce a prompt that requests translation from the detected or unspecified source language into the target language. Reading the `--glossary` file, parsing `--context`, and handing the values to the engine are specified by the `subtitle-translation` capability's *Translation Guidance Options* requirement in `subx-cli`.
+
+#### Scenario: glossary entries are included in prompt
+- **GIVEN** a translation request carrying caller-supplied glossary entries
+- **WHEN** the engine builds the translation prompt
+- **THEN** the prompt SHALL include the entries as terminology guidance
+- **AND** the engine SHALL still require the AI response to use the structured cue ID mapping
+
+#### Scenario: inline context is included in prompt
+- **GIVEN** a translation request built with the inline context `"Use formal business tone"`
+- **WHEN** the engine builds the translation prompt
+- **THEN** the prompt SHALL include that text as domain or tone guidance
+- **AND** SHALL NOT interpret the context value as a filesystem path
+
+#### Scenario: source language is optional
+- **GIVEN** a translation request that omits the source language
+- **WHEN** the engine builds the translation prompt
+- **THEN** the prompt SHALL request translation from the detected or unspecified source language into the target language
+
 ### Requirement: Translation Configuration
 
 The system SHALL expose validated translation configuration for default batch

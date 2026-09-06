@@ -1,5 +1,17 @@
 ## ADDED Requirements
 
+### Requirement: Sensitive Value Masking Helper
+
+The masking primitive SHALL live in this repository as `mask_sensitive_value` in `src/config/masking.rs`. It SHALL treat a config key as sensitive when its name matches `api_key`, `token`, or `secret` case-insensitively, and SHALL render a sensitive value as `****<last 4 chars>` (or `****` when the value is ≤4 chars). The obligation that the `config set`, `config list`, and `config get` display sites call the helper and never print the raw value alongside the masked one is specified by the `secrets-protection` capability's *Mask sensitive config values in CLI output* requirement in `subx-cli`.
+
+#### Scenario: sensitive key match is case-insensitive
+- **WHEN** the helper is asked to mask the value of a key named `AI.API_KEY`
+- **THEN** the returned string SHALL be masked, not the plaintext value
+
+#### Scenario: short secret is fully masked
+- **WHEN** the api_key value is 3 characters
+- **THEN** the helper SHALL return `****`
+
 ### Requirement: Redact API keys in Debug output
 
 All structs holding API keys (OpenAIClient, OpenRouterClient, AzureOpenAIClient, AIConfig) SHALL NOT expose the `api_key` field via `Debug` formatting. The Debug output MUST show `[REDACTED]` for the api_key field.

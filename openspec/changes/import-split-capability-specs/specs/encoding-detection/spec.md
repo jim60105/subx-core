@@ -1,5 +1,19 @@
 ## ADDED Requirements
 
+### Requirement: Detector Tolerates Empty and Binary Input
+
+The charset detector SHALL NOT panic when its input is empty or contains binary (non-text) bytes: for such input it SHALL return either a normal detection result (a best-effort encoding with its confidence) or a typed per-file error, so that a caller processing a batch of files retains full control over whether the batch continues. The batch loop's own resilience and the process exit status are specified by the `encoding-detection` capability's *Robust Handling of Empty and Binary Files* requirement in `subx-cli`.
+
+#### Scenario: Detector on empty input does not panic
+- **GIVEN** a zero-byte buffer supplied to the detector
+- **WHEN** detection runs
+- **THEN** the detector SHALL return a result — a best-effort detection or an error — and SHALL NOT panic or abort the process
+
+#### Scenario: Detector on binary input does not panic
+- **GIVEN** a buffer containing binary (non-text) bytes supplied to the detector
+- **WHEN** detection runs
+- **THEN** the detector SHALL return a best-effort detection result or a per-file error, and SHALL NOT panic
+
 ### Requirement: Low-Confidence Fallback To Default Encoding
 
 When no encoding candidate scores above `formats.encoding_detection_confidence`, the detector SHALL fall back to the configured default encoding (e.g. UTF-8), SHALL report a fixed fallback confidence of `0.5`, and SHALL prefix the sample text with a `Low confidence detection, using default:` marker. When there are no candidates at all, the fallback SHALL instead use confidence `0.1` and prefix the sample with `Unable to detect encoding, using default:`. Implemented in `src/core/formats/encoding/detector.rs::select_best_encoding`.
