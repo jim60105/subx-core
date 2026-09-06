@@ -15,7 +15,18 @@ Instructions for AI coding agents working on **subx-core**.
   default — `cargo build --release` must not compile the module.
 - **`subx-core/tests/` is flat** (Cargo auto-discovers `tests/*.rs` only), so
   it has no `#[path]` shims; shared code comes from `test_support`, not a
-  `tests/common/`.
+  `tests/common/`. The `every_subdirectory_test_file_has_exactly_one_harness_shim`
+  guard in the `subx-cli` repository (`subx-cli/tests/core_cli_boundary.rs`)
+  walks this crate's `tests/` tree too and fails the build if a subdirectory
+  ever holds a `.rs` file with zero or more than one declaring shim — never
+  park a test file in a `tests/` subdirectory.
+- **Revive or delete — never leave an orphan:** revive a dead test file when
+  its imports already resolve (after rewriting to `subx_core::…` paths),
+  delete it when reviving would require authoring production code that does
+  not exist (record the deletion in `CHANGELOG.md`). When a revived test's
+  assertion fails because behaviour legitimately changed, update the
+  **assertion** to characterise current behaviour — never change production
+  code to satisfy a test that has never executed.
 - **Fixture and asset reads resolve from `env!("CARGO_MANIFEST_DIR")`**, never
   the working directory — the parser fixtures (`tests/fixtures/formats/`) and
   the media assets (`assets/`) ship in this repository.
