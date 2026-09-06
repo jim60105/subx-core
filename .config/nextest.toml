@@ -22,6 +22,13 @@ status-level = "pass"
 # Test output format
 final-status-level = "slow"
 
+# JUnit XML output settings. nextest resolves `junit.path` relative to the
+# profile's store directory (target/nextest/<profile>/), so "junit.xml"
+# lands on target/nextest/default/junit.xml. A path that already names
+# target/... doubles the prefix — keep this value a bare file name.
+[profile.default.junit]
+path = "junit.xml"
+
 [profile.ci]
 # CI environment settings
 retries = 2
@@ -51,7 +58,3 @@ test-threads = "num-cpus"
 failure-output = "immediate"
 status-level = "pass"
 final-status-level = "slow"
-
-[profile.default.junit]
-# JUnit XML output settings
-path = "target/nextest/junit.xml"

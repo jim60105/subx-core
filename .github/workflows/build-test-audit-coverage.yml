@@ -1,0 +1,132 @@
+name: Build, Test, Audit & Coverage
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable]
+
+    steps:
+    # No `submodules:` option — subx-core has no submodules. (The
+    # superproject's workflow of the same name carries `submodules:
+    # recursive`; this repository's does not, and that difference is the
+    # point of keeping the two files diffable.)
+    - uses: actions/checkout@v6
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+
+    - name: Cache cargo registry
+      uses: actions/cache@v5
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v5
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v5
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('Cargo.lock') }}
+
+    - name: Quality check (fmt, check, clippy, docs, doctests, tests)
+      # Windows runners ship bash, so the same script defines the check set
+      # on all three OSes — one definition, three equivalent matrix entries.
+      shell: bash
+      run: scripts/quality_check.sh ci
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    # Audits THIS repository's committed Cargo.lock — subx-core's own
+    # resolved graph. The superproject's `security` job audits the workspace
+    # union (both crates' dependencies merged), which is the right surface
+    # for the shipped subx-cli binary but the wrong one for this crate: no
+    # consumer of subx-core alone ever resolves that union, so an advisory in
+    # a subx-cli-only dependency (ort, assert_cmd, …) is not this crate's
+    # vulnerability, and one in core's own dependencies must not hide behind
+    # the union's noise.
+    - name: Audit Rust Dependencies
+      uses: actions-rust-lang/audit@v1.2.7
+
+  coverage:
+    # ubuntu-latest only: the per-file JSON/LCOV shapes and the exclusion
+    # regex behave identically per OS, and superproject's coverage matrix
+    # already covers Windows for the workspace-attributed measurement.
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-llvm-cov
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+
+    - name: Generate code coverage
+      # One instrumented run, then report. The --ignore-filename-regex is the
+      # byte-identical exclusion set of subx-cli's scripts/check_coverage.sh:
+      # test harnesses, benches, binary entry points and the feature-gated
+      # `test_support` mock machinery are not this crate's shipped code.
+      run: |
+        cargo llvm-cov nextest --profile ci --features slow-tests --no-report
+        cargo llvm-cov report --lcov --output-path lcov.info --ignore-filename-regex '(^|/)(tests|benches)/|(^|/)src/main\.rs$|(^|/)src/test_support/'
+
+    # No threshold gate here, on purpose (design.md Decision 9): a
+    # standalone run has the same denominator as the workspace-attributed
+    # measurement B4's 90% floor was derived from, but a strictly smaller
+    # numerator — the ~thousand CLI-side tests that drive core code through
+    # `subx_cli::commands::match_command::execute` do not exist in this
+    # repository. Gating the standalone number against the workspace floor
+    # would fail a crate that is fine; standalone floors, once wanted, must be
+    # derived from a measurement of this run (the percentage this job uploads
+    # is recorded in CHANGELOG.md), never by scaling the workspace number.
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@v6
+      with:
+        files: lcov.info
+        flags: coverage-subx-core
+        fail_ci_if_error: false

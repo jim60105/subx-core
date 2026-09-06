@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-06
+
+First publication of `subx-core`: the core library extracted from [`subx-cli`](https://github.com/jim60105/subx-cli) — the `config`, `core`, `error` and `services` trees migrated at their identical relative paths with `git filter-repo` history, so `git log`/`git blame` cross the repository boundary. The crate is a Cargo workspace member of `subx-cli`, mounted there as a git submodule, and standalone-buildable (no workspace inheritance, no `[workspace]`/`[profile]` tables). Public surface: `subx_core::{config, core, error, services}` plus the twelve `#[macro_export]` configuration test macros, deliberately identical to the pre-split `subx_cli::` paths with only the crate name swapped. `test-support` gates `src/test_support/` so no release artifact compiles it. Licence: GPL-3.0-or-later. Published to crates.io from `subx-cli`'s release workflow via `cargo publish --workspace` — not from this repository.
+
+### Added
+- Own CI: `.github/workflows/build-test-audit-coverage.yml` — three-OS `test` job (`scripts/quality_check.sh ci` through bash), a `security` job auditing this repository's own `Cargo.lock` (not the superproject's workspace union), and an ubuntu `coverage` job uploading LCOV with the same `--ignore-filename-regex` exclusion set as `subx-cli`'s script. The coverage job deliberately enforces no threshold: workspace-derived floors do not apply to a standalone run (design.md Decision 9).
+- `scripts/quality_check.sh` — the deliberately small local gate (fmt, `check --all-features`, lib-only clippy `-D warnings`, `cargo doc`, doctests, `nextest --profile "${1:-default}" --features slow-tests`); the superproject's script remains the authority for paired changes.
+- Standalone coverage baseline recorded so a future standalone floor can be derived from a measurement: **90.62%** line coverage (19,028/20,998, single instrumented `ci`-profile run with the reporting exclusions applied), 1,332 tests green.
+
+
 ### Added
 - `tests/input_handler_tests.rs` and `tests/parallel_integration_tests.rs`: two never-compiled test files revived from `subx-cli`'s `tests/cli/` and `tests/parallel/` subdirectories (they had no `#[path]` shim and were therefore built by no target). The input-handler tests compare collected file lists through `CollectedFiles::into_paths()`; the parallel tests name `WorkerPool` through its home module (`parallel::worker`), and their `ConvertFormat` leg was dropped — see Removed.
 
@@ -40,3 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   macros at the defining crate's root.
 - `config::service::read_config_value_from` is public: its other caller is
   the `subx-cli` `config get` command, which now crosses the crate boundary.
+
+### Fixed
+- `[profile.default.junit] path` no longer doubles the store prefix (was `target/nextest/junit.xml`, resolving to `target/nextest/default/target/nextest/junit.xml`); now `junit.xml` with the table beside `[profile.default]`, and every comment in English (closing the wording divergence B1 deliberately left with the parent).
+- `.gitignore`: dropped the `target/nextest/*/junit.xml` pattern subsumed by `junit.xml` and `/target/`.
+

@@ -80,6 +80,37 @@ modes working:
   tree following the pointer on `git pull`/`git checkout` (per-clone setting;
   does not apply to `git clone`).
 
+## Continuous Integration
+
+`.github/workflows/build-test-audit-coverage.yml` runs three jobs on every
+push/PR to `main`:
+
+| Job | What it does |
+|---|---|
+| `test` (ubuntu / windows / macOS) | `scripts/quality_check.sh ci` — fmt, `check --all-features`, lib-only clippy `-D warnings`, `cargo doc`, doctests, `nextest --profile ci --features slow-tests` — through bash on all three OSes (Windows runners ship bash), so one script defines the check set |
+| `security` | `actions-rust-lang/audit@v1.2.7` on **this repository's own `Cargo.lock`** — core's own resolved graph, deliberately narrower than the superproject's workspace-union audit, which mixes in subx-cli-only dependencies no consumer of this crate ever resolves |
+| `coverage` (ubuntu) | one instrumented `cargo llvm-cov nextest` run, LCOV uploaded to codecov with the same `--ignore-filename-regex` exclusion set as `subx-cli/scripts/check_coverage.sh` |
+
+Two rules fall out of this:
+
+- **The pointer is release load-bearing.** A `subx-cli` tag's release build
+  compiles the gitlink commit, not `main`. The commit you point at must be
+  this repository's `main` HEAD (or an ancestor of it) whose CI you have
+  seen pass.
+- **No coverage threshold gate exists here, on purpose.** The 90% core floor
+  (and the 75% workspace / 82% CLI floors) are enforced in `subx-cli`'s
+  scripts against the *workspace-attributed* numbers; the ~thousand CLI-side
+  tests that drive core code from the other repository do not exist in this
+  one, so a standalone gate must never borrow a workspace-derived floor — it
+  needs a measurement of a standalone run (the percentage this job uploads to
+  codecov), which nobody has made yet.
+
+`.github/workflows/release.yml` exists so publication *can* be wired to a
+`v*` tag later, but **nothing in this change publishes from it** — crates.io
+publication goes through `subx-cli`'s `publish-crates` job (a single
+`cargo publish --workspace`), and this repository's release workflow is not
+triggered by C1 in any way.
+
 ## Module Guide
 
 The library sources migrated from `subx-cli` at their identical relative
