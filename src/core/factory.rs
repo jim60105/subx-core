@@ -89,7 +89,8 @@ impl ComponentFactory {
         std::sync::Arc::clone(&self.reporter)
     }
 
-    /// Return the [`MatchConfig`] this factory's loaded [`Config`] implies.
+    /// Return the [`MatchConfig`](crate::core::matcher::MatchConfig) this
+    /// factory's loaded [`Config`] implies.
     ///
     /// The returned value carries the four configuration-derived fields read
     /// from the loaded config (`max_sample_length`, `ai_model`,
