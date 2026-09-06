@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the core translation pipeline: subtitle structure preservation, AI-provider translation with stable cue mapping and two-pass terminology consistency, matching and ordering of translated cues, caller-supplied prompt guidance (source language, glossary entries, inline context), translation configuration, safe output behavior, per-file error isolation, and documentation coverage — implemented in this repository's translation service modules (per the archived requirements' own path citations). The `subx-cli` repository carries the same-named `subtitle-translation` capability holding the CLI halves: the `translate` command interface, subtitle input collection, and the guidance-file/flag plumbing.
+Define the core translation pipeline: subtitle structure preservation, AI-provider translation with stable cue mapping and two-pass terminology consistency, matching and ordering of translated cues, caller-supplied prompt guidance inputs, translation configuration, and provider error mapping. The `subx-cli` repository carries the same-named `subtitle-translation` capability holding the command-surface half: the `translate` command interface, subtitle input collection, the guidance-file and flag plumbing, safe output behavior, per-file error isolation, and documentation coverage. Implemented in `src/core/translation/` and `src/services/ai/`.
+
 ## Requirements
 
 ### Requirement: Subtitle Structure Preservation

@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the core subtitle-format machinery: the per-format conversion semantics and matching file extensions, original-file preservation, per-file error isolation during batch conversion, the pre-parse file-size check, parser robustness on malformed input, parser/serializer round-trip stability, and the public format API's stability across module reorganization — rooted in this repository's `src/core/subtitle/` (per the archived requirements' own path citations). The `subx-cli` repository carries the same-named `format-conversion` capability holding the CLI halves: the supported `--format` value surface, input/output path resolution, and the structured JSON payload.
+Define the core subtitle-format machinery: the per-format conversion semantics and matching file extensions, the pre-parse file-size check, parser robustness on malformed input, parser/serializer round-trip stability, and the public format API's stability across module reorganization. The `subx-cli` repository carries the same-named `format-conversion` capability holding the command-surface half: the supported `--format` value surface, input/output path resolution, original-file preservation and per-file error isolation at the command level, and the structured JSON payload. Implemented in `src/core/formats/`.
+
 ## Requirements
 
 ### Requirement: Target Format Conversion Semantics

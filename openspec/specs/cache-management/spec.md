@@ -1,8 +1,9 @@
-# Match Cache Management
+# Cache Management
 
 ## Purpose
 
-Define the core-side match-cache contract: the canonical cache file location resolved through the platform configuration directory, the JSON cache format and its schema, configuration-aware cache invalidation, cache reuse that preserves relocation modes, dry-run cache reuse without AI calls, and the file-list-directory scoping key. Implemented under `src/core/matcher/` and `src/services/cache/` (per the archived requirements' own path citations). The `subx-cli` repository carries the same-named `cache-management` capability holding the CLI halves: the `cache clear` subcommand, its independent path resolver, and the structured JSON payloads of the cache subcommands.
+Define the core-side match-cache contract: the canonical cache file location resolved through the platform configuration directory, the JSON cache format and its schema, configuration-aware cache invalidation, cache reuse that preserves relocation modes, dry-run cache reuse without AI calls, and the file-list-directory scoping key. The `subx-cli` repository carries the same-named `cache-management` capability holding the command-surface half: the `cache clear` subcommand, its independent path resolver, and the structured JSON payloads of the cache subcommands. Implemented in `src/core/matcher/`.
+
 ## Requirements
 
 ### Requirement: Match Cache Location

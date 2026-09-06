@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the core sync machinery: the two sync methods and their engine-side selection, offset clamping, subtitle timing application, VAD audio processing and detector behavior, first-sentence offset annotation, VAD padding configuration, manual-offset application, the core-owned pairing resolution and default output path derivation, and the sync command's structured JSON payload — implemented in `src/core/sync/` and `src/core/audio/` (per the archived requirements' own path citations). The `subx-cli` repository carries the same-named `timeline-sync` capability holding the CLI halves: the `sync` argument structs as thin adapters, batch pairing heuristics, single-file mode framing, and CLI VAD parameter overrides.
+Define the core sync machinery: the two sync methods and their engine-side selection, offset clamping, subtitle timing application, VAD audio processing and detector behavior, first-sentence offset annotation, VAD padding configuration, the VAD-independent manual-offset transform, the core-owned pairing resolution and default output path derivation, and the sync operation's structured JSON payload. The `subx-cli` repository carries the same-named `timeline-sync` capability holding the command-surface half: the `sync` argument struct as a thin adapter, batch pairing heuristics, single-file mode framing, and CLI VAD parameter overrides. Implemented in `src/core/sync/` and `src/services/vad/`.
+
 ## Requirements
 
 ### Requirement: Sync Method Selection

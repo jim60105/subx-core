@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define `InputPathHandler` and `CollectedFiles` in `src/core/input/`: unified path merging, extension whitelisting, recursive versus flat traversal, direct and mixed input handling, directory deduplication, invalid-path surfacing, the no-extract collection switch, archive-origin mapping, `CollectedFiles` read APIs, and archive-aware output location resolution — a module with no argument-parser coupling. The `subx-cli` repository carries the same-named `input-path-handling` capability holding the CLI halves: the clap argument structs, their thin-adapter `get_input_handler` methods, per-command extension whitelists, flag forwarding, and the legacy re-exports.
+Define `InputPathHandler` and `CollectedFiles`: unified path merging, extension whitelisting, recursive versus flat traversal, direct and mixed input handling, directory deduplication, invalid-path surfacing, the no-extract collection switch, archive-origin mapping, `CollectedFiles` read APIs, and archive-aware output location resolution — a module with no argument-parser coupling. The `subx-cli` repository carries the same-named `input-path-handling` capability holding the command-surface half: the clap argument structs, their thin-adapter methods, per-command extension whitelists, flag forwarding, and the legacy re-exports. Implemented in `src/core/input/mod.rs`.
+
 ## Requirements
 
 ### Requirement: Recursive vs Flat Traversal

@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the core secrets-protection primitives: the `mask_sensitive_value` masking helper in `src/config/masking.rs` with its case-insensitive sensitive-key matching and `****`-suffix rendering, API-key redaction in `Debug` output, the restrictive config-file permission check, and the insecure-HTTP endpoint warning. The `subx-cli` repository carries the same-named `secrets-protection` capability holding the display-site obligation that `config set`, `config list`, and `config get` call the masking helper and never print raw values.
+Define the core secrets-protection primitives: the `mask_sensitive_value` masking helper with its case-insensitive sensitive-key matching and `****`-suffix rendering, API-key redaction in `Debug` output, the restrictive config-file permission check, and the insecure-HTTP endpoint warning. The `subx-cli` repository carries the same-named `secrets-protection` capability holding the display-site obligation that `config set`, `config list`, and `config get` call the masking helper and never print raw values. Implemented in `src/config/masking.rs`.
+
 ## Requirements
 
 ### Requirement: Sensitive Value Masking Helper

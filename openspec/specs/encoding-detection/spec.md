@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the core encoding-detection behavior: the detector's tolerance of empty and binary input without panicking, and the low-confidence fallback to the configured default encoding. Implemented in this repository's charset-detection module (per the archived requirements' own path citations). The `subx-cli` repository carries the same-named `encoding-detection` capability holding the CLI halves: the per-file encoding report, input source selection, verbose sample output, the batch-level robustness framing, legacy positional paths, and the structured JSON payload.
+Define the core encoding-detection behavior: the detector's tolerance of empty and binary input without panicking, and the low-confidence fallback to the configured default encoding. The `subx-cli` repository carries the same-named `encoding-detection` capability holding the command-surface half: the per-file encoding report, input source selection, verbose sample output, the batch-level robustness framing, legacy positional paths, and the structured JSON payload. Implemented in `src/core/formats/encoding/`.
+
 ## Requirements
 
 ### Requirement: Detector Tolerates Empty and Binary Input

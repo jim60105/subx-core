@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the library error surface: the `SubXError` taxonomy in `src/error.rs`, its automatic conversions and chained sources, the library-side `Display` rendering, API error source enumeration, the no-panic obligation for recoverable failures, sanitized upstream messages, the no-sensitive-data rule, the stable machine-readable category and code, and the rule that the library surface holds only machine contracts. The `subx-cli` repository carries the same-named `error-handling` capability holding the presentation halves: user-facing formatting, exit-code mapping, top-level rendering, the no-panic obligation on subcommands, and the `SubXErrorExt` binary extension trait.
+Define the library error surface: the `SubXError` taxonomy, its automatic conversions and chained sources, the library-side `Display` rendering, API error source enumeration, the no-panic obligation for recoverable failures, sanitized upstream messages, the no-sensitive-data rule, the stable machine-readable category and code, and the rule that the library surface holds only machine contracts. The `subx-cli` repository carries the same-named `error-handling` capability holding the presentation half: user-facing formatting, exit-code mapping, top-level rendering, the no-panic obligation on subcommands, and the `SubXErrorExt` binary extension trait. Implemented in `src/error.rs`.
+
 ## Requirements
 
 ### Requirement: Typed Error Taxonomy

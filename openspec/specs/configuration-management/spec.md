@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the layered configuration model and its core load-and-validate pipeline: the unified schema, the `ConfigService` abstraction, the tolerant load path with its repair mechanism, field-level value validation with boolean flexibility, AI environment-variable and compatibility-variable overrides, custom configuration file paths, legacy sync configuration rejection, service reload, AI provider identifier canonicalization, local-provider validation rules and environment variables, and Unix config-file permission enforcement — all rooted in this repository's `src/config/` tree. The `subx-cli` repository carries the same-named `configuration-management` capability holding the CLI halves: the `config` subcommand operations, the workspace directory override, and sensitive value masking at the display sites.
+Define the layered configuration model and its core load-and-validate pipeline: the unified schema, the `ConfigService` abstraction, the tolerant load path with its repair mechanism, field-level value validation with boolean flexibility, AI environment-variable and compatibility-variable overrides, custom configuration file paths, legacy sync configuration rejection, service reload, AI provider identifier canonicalization, local-provider validation rules and environment variables, and Unix config-file permission enforcement. The `subx-cli` repository carries the same-named `configuration-management` capability holding the command-surface half: the `config` subcommand operations, the workspace directory override, and sensitive value masking at the display sites. Implemented in `src/config/`.
+
 ## Requirements
 
 ### Requirement: Unified Configuration Schema

@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the core match engine: AI-based file pairing over `AnalysisRequest`, confidence-threshold filtering, dry-run versus live execution, the `FileRelocationMode` relocation model, backup-before-move, per-scan UUIDv7 file identifiers, AI-driven language and globally-unique target naming with the archive-origin relocation function, and the structured JSON operation payload — implemented in `src/core/matcher/` (per the archived requirements' own path citations). The `subx-cli` repository carries the same-named `subtitle-matching` capability holding the CLI halves: the `match` flag surface and preconditions, mutual-exclusion validation, and the call-ordering obligation between archive-origin relocation and uniqueness allocation.
+Define the core match engine: AI-based file pairing over `AnalysisRequest`, confidence-threshold filtering, dry-run versus live execution, the `FileRelocationMode` relocation model, backup-before-move, per-scan UUIDv7 file identifiers, AI-driven language and globally-unique target naming with the archive-origin relocation function, and the structured JSON operation payload. The `subx-cli` repository carries the same-named `subtitle-matching` capability holding the command-surface half: the `match` flag surface and preconditions, mutual-exclusion validation, and the call-ordering obligation between archive-origin relocation and uniqueness allocation. Implemented in `src/core/matcher/`.
+
 ## Requirements
 
 ### Requirement: Optional Backup Before Move

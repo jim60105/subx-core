@@ -1,8 +1,9 @@
-# Component Factory Construction
+# Component Factory
 
 ## Purpose
 
-Define the `ComponentFactory` construction contracts: `ConfigService`-driven construction of AI providers, match engines, VAD and audio components, pre-construction configuration validation, and the dependency-injection path through which consumers receive services. Implemented in `src/services/` and `src/config/` (per the archived requirements' own path citations). The `subx-cli` repository carries the same-named `component-factory` capability holding the CLI halves: commands consuming services via dependency injection and the test-suite's `TestConfigService` usage.
+Define the `ComponentFactory` construction contracts: `ConfigService`-driven construction of AI providers, match engines, VAD and audio components, pre-construction configuration validation, and the dependency-injection path through which consumers receive services. The `subx-cli` repository carries the same-named `component-factory` capability holding the command-surface half: commands consuming services via dependency injection and the test-suite's `TestConfigService` usage. Implemented in `src/core/factory.rs`.
+
 ## Requirements
 
 ### Requirement: ConfigService-Driven Construction

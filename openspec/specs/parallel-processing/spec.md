@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define the core parallel-execution machinery: the `TaskScheduler` entry point and its boxed-task collection contract, bounded concurrency, non-blocking I/O in the async executor, active task accounting correctness, and UUIDv7 worker and task identifiers. Implemented in this repository's `src/core/` task-scheduling modules (per the archived requirements' own path citations). The `subx-cli` repository carries the same-named `parallel-processing` capability holding the CLI halves: aggregated result reporting, progress opt-out, batch task submission, queue overflow strategy, and optional task priority ordering.
+Define the core parallel-execution machinery: the `TaskScheduler` entry point and its boxed-task collection contract, bounded concurrency, non-blocking I/O in the async executor, active task accounting correctness, and UUIDv7 worker and task identifiers. The `subx-cli` repository carries the same-named `parallel-processing` capability holding the command-surface half: aggregated result reporting, progress opt-out, batch task submission, queue overflow strategy, and optional task priority ordering. Implemented in `src/core/parallel/`.
+
 ## Requirements
 
 ### Requirement: Task Scheduler Entry Point
