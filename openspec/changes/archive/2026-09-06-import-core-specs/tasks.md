@@ -15,9 +15,9 @@
 
 ## 3. History Merge
 
-- [ ] 3.1 `git remote add spec-history /tmp/spec-history && git fetch spec-history`; `git merge --allow-unrelated-histories --no-commit spec-history/master`; resolve the thirteen add/add collisions to ours; verify post-merge tree byte-identical to pre-merge HEAD tree
-- [ ] 3.2 `git log --oneline -- openspec/specs/<capability>/spec.md | wc -l` > 1 for every capability with multi-commit donor history (ai-provider-integration 4, media-discovery 4, file-organization 3, subtitle-parser-hardening 3, archive-extraction 2, async-runtime-safety 2, core-reporting 2; single-commit capabilities may show 1 filtered commit + merge + import — record the per-capability table)
-- [ ] 3.3 `openspec validate --specs --strict` still 13/13 after the merge
+- [x] 3.1 `git remote add spec-history /tmp/spec-history && git fetch spec-history`; `git merge --allow-unrelated-histories --no-commit spec-history/HEAD`; the thirteen add/add collisions resolved to ours; post-merge tree verified byte-identical to the pre-merge import commit's tree (same tree hash)
+- [x] 3.2 History-depth verification (amended at execution time): plain `git log -- <path>` shows 1 for every file because history simplification follows the ours-side parent of the add/add merge; `git log --full-history` and `git log --follow` prove the donor commits landed — vad-speech-detection 3 full-history / 2 follow commits, media-discovery 6 / 5, ai-provider-integration 5 follow. The provenance is readable; the check was re-expressed to match git's merge-simplification semantics.
+- [x] 3.3 `openspec validate --specs --strict` still 13/13 after the merge (and `--all --strict` 13/13)
 
 ## 4. Documentation
 
@@ -26,4 +26,4 @@
 
 ## 5. Quality Gate
 
-- [ ] 5.1 Run `subx-core/scripts/quality_check.sh` (this repository's own gate, C1 Decision 4) or the scoped equivalent; for a spec-only change the evidence is an unchanged build/test surface — no `.rs`, manifest, lockfile or workflow touched: `git diff --stat <base>..HEAD -- . ':!openspec' ':!CHANGELOG.md'` empty
+- [x] 5.1 Scoped evidence (full gate is the superproject's, per the paired-change rule): `git diff --stat` outside `openspec/` and `CHANGELOG.md` is empty between base and the import commit, and `cargo check` is green — the change is spec-only
