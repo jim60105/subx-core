@@ -1949,7 +1949,17 @@ impl MatchEngine {
             if let Some(path) = journal_file.as_ref() {
                 // Persist after every successful operation so interruption
                 // leaves the on-disk journal consistent with the file system.
-                journal.save(path).await?;
+                if let Err(e) = journal.save(path).await {
+                    // A persistence failure aborts the loop, but the stream
+                    // contract is unconditional: once `Started` was emitted,
+                    // a reporter must see exactly one `Finished`. Close the
+                    // stream with the completed count before propagating.
+                    self.reporter.progress(&ProgressEvent::Finished {
+                        done: completed,
+                        total,
+                    });
+                    return Err(e);
+                }
             }
 
             completed += 1;
@@ -2155,7 +2165,16 @@ impl MatchEngine {
             });
 
             if let Some(path) = journal_file.as_ref() {
-                journal.save(path).await?;
+                if let Err(e) = journal.save(path).await {
+                    // Same stream contract as `execute_operations`: close
+                    // with `Finished` before propagating a persistence
+                    // failure, so a reporter never sees a dangling `Started`.
+                    self.reporter.progress(&ProgressEvent::Finished {
+                        done: outcomes.len() as u64,
+                        total,
+                    });
+                    return Err(e);
+                }
             }
 
             outcomes.push(OperationOutcome {

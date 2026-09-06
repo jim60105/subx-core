@@ -13,8 +13,21 @@
 use subx_core::config::TestConfigBuilder;
 use subx_core::core::ComponentFactory;
 use subx_core::core::matcher::engine::{FileRelocationMode, MatchOperation};
+use subx_core::core::report::Reporter;
 use subx_core::test_support::mock_openai::MockOpenAITestHelper;
 use tempfile::TempDir;
+
+/// Records every diagnostic channel call, in order.
+#[derive(Default)]
+struct RecordingReporter {
+    diagnostics: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl Reporter for RecordingReporter {
+    fn diagnostic(&self, message: &str) {
+        self.diagnostics.lock().unwrap().push(message.to_string());
+    }
+}
 
 /// Pair a root-level video with a subdirectory subtitle through a factory
 /// engine built via `create_match_engine_with(factory.match_config())`
@@ -86,4 +99,48 @@ async fn default_match_config_does_not_relocate() {
     assert_eq!(op.relocation_mode, FileRelocationMode::None);
     assert!(!op.requires_relocation);
     assert_eq!(op.relocation_target_path, None);
+}
+
+/// Delta scenario "Factory reporter reaches an engine built from a supplied
+/// config": `create_match_engine_with` must attach the factory's reporter,
+/// not the default noop. `match_file_list_with_audit` emits the AI analysis
+/// block as one diagnostic per run, so a recording reporter proves
+/// propagation end to end — dropping `.with_reporter(self.reporter())`
+/// from `create_match_engine_with` fails this test.
+#[tokio::test]
+async fn factory_reporter_reaches_engine_built_with_supplied_config() {
+    let mock = MockOpenAITestHelper::new().await;
+    mock.mock_chat_completion_echoing_request_ids(1, 1, 0.95)
+        .await;
+
+    let root = TempDir::new().unwrap();
+    let video = root.path().join("movie.mkv");
+    let sub = root.path().join("movie.srt");
+    std::fs::write(&video, b"video-bytes").unwrap();
+    std::fs::write(&sub, b"1\n00:00:01,000 --> 00:00:02,000\nhi\n").unwrap();
+
+    let config_service = TestConfigBuilder::new()
+        .with_mock_ai_server(&mock.base_url())
+        .build_service();
+    let reporter = RecordingReporter::default();
+    let sink = std::sync::Arc::new(std::sync::Arc::clone(&reporter.diagnostics));
+    let factory = ComponentFactory::new(&config_service)
+        .expect("factory")
+        .with_reporter(std::sync::Arc::new(reporter));
+
+    let engine = factory
+        .create_match_engine_with(factory.match_config())
+        .expect("engine with mock AI");
+    engine
+        .match_file_list(&[video, sub])
+        .await
+        .expect("mock AI must produce a match");
+
+    let diagnostics = sink.lock().unwrap();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.starts_with("🔍 AI Analysis Results:")),
+        "the factory reporter must receive the engine's analysis diagnostic, got {diagnostics:?}"
+    );
 }

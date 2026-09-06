@@ -144,6 +144,29 @@ async fn config_home_guard() -> (TempDir, tokio::sync::MutexGuard<'static, ()>) 
     (dir, guard)
 }
 
+/// Pin `XDG_CONFIG_HOME` to a regular FILE, so every journal path under it
+/// (`<file>/subx/match_journal.json`) has an un-creatable parent and
+/// `JournalData::save` fails deterministically with an I/O error — while the
+/// file operations themselves keep succeeding.
+async fn broken_config_home_guard() -> (TempDir, tokio::sync::MutexGuard<'static, ()>) {
+    let guard = TEST_MUTEX.lock().await;
+    let dir = TempDir::new().expect("create temp config dir");
+    let blocker = dir.path().join("not-a-dir");
+    fs::write(&blocker, b"journal parent must fail to be created").unwrap();
+    // SAFETY: TEST_MUTEX serialises every env mutation in this binary.
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", &blocker);
+    }
+    (dir, guard)
+}
+
+fn assert_io_err(err: &subx_core::error::SubXError) {
+    assert!(
+        matches!(err, subx_core::error::SubXError::Io(_)),
+        "journal persistence failure must surface as the original I/O error, got {err:?}"
+    );
+}
+
 fn engine() -> MatchEngine {
     MatchEngine::new(Box::new(PanicAI), make_config())
 }
@@ -448,5 +471,55 @@ async fn execute_first_error_closes_short() {
         "one completed unit, early close at done < total, cancellation ignored"
     );
     // The completed unit's work persists.
+    assert!(work.path().join("a.en.srt").exists());
+}
+
+#[tokio::test]
+async fn execute_journal_save_failure_closes_stream_before_err() {
+    // The stream contract is unconditional: a journal persistence failure
+    // aborts the loop AFTER `Started`, so the loop must emit exactly one
+    // `Finished` before propagating the error — never leave a reporter
+    // holding a dangling stream.
+    let (_xdg, _guard) = broken_config_home_guard().await;
+    let work = TempDir::new().unwrap();
+    let (reporter, events) = RecordingReporter::new();
+    let engine = engine_with(reporter);
+    let ops = vec![pair(work.path(), "a"), pair(work.path(), "b")];
+
+    let err = engine
+        .execute_operations(&ops, false)
+        .await
+        .expect_err("journal save into a broken config home must fail");
+    assert_io_err(&err);
+
+    assert_eq!(
+        recorded(&events),
+        ["started:2", "finished:0/2"],
+        "one Finished closes the stream before the Err, with the completed count"
+    );
+    // The first operation was applied before the persistence failure.
+    assert!(work.path().join("a.en.srt").exists());
+}
+
+#[tokio::test]
+async fn audit_journal_save_failure_closes_stream_before_err() {
+    // Same contract on the audited (JSON-mode) loop.
+    let (_xdg, _guard) = broken_config_home_guard().await;
+    let work = TempDir::new().unwrap();
+    let (reporter, events) = RecordingReporter::new();
+    let engine = engine_with(reporter);
+    let ops = vec![pair(work.path(), "a"), pair(work.path(), "b")];
+
+    let err = engine
+        .execute_operations_audit(&ops, false)
+        .await
+        .expect_err("journal save into a broken config home must fail");
+    assert_io_err(&err);
+
+    assert_eq!(
+        recorded(&events),
+        ["started:2", "finished:0/2"],
+        "one Finished closes the stream before the Err, with the completed count"
+    );
     assert!(work.path().join("a.en.srt").exists());
 }
