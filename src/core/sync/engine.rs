@@ -37,6 +37,13 @@ impl SyncEngine {
     /// # Returns
     ///
     /// A new sync engine instance with initialized VAD detector if enabled.
+    ///
+    /// The VAD detector requirement is unconditional: construction fails
+    /// when `config.vad.enabled` is false as well as when detector
+    /// initialization fails, regardless of the sync method the caller will
+    /// ultimately use. A caller that only needs the manual-offset transform
+    /// should use [`crate::core::sync::shift_subtitle_timing`] instead of
+    /// constructing an engine.
     pub fn new(config: SyncConfig) -> Result<Self> {
         let vad_detector = if config.vad.enabled {
             match VadSyncDetector::new(config.vad.clone()) {
@@ -192,46 +199,7 @@ impl SyncEngine {
             )));
         }
 
-        let start = Instant::now();
-        for entry in &mut subtitle.entries {
-            let offset_dur = Duration::from_secs_f32(offset_seconds.abs());
-            if offset_seconds >= 0.0 {
-                entry.start_time = entry.start_time.checked_add(offset_dur).ok_or_else(|| {
-                    SubXError::audio_processing("Invalid offset results in negative time")
-                })?;
-                entry.end_time = entry.end_time.checked_add(offset_dur).ok_or_else(|| {
-                    SubXError::audio_processing("Invalid offset results in negative time")
-                })?;
-            } else {
-                // For negative offsets, clamp times to zero instead of erroring on underflow
-                entry.start_time = if entry.start_time > offset_dur {
-                    entry.start_time - offset_dur
-                } else {
-                    Duration::ZERO
-                };
-                entry.end_time = if entry.end_time > offset_dur {
-                    entry.end_time - offset_dur
-                } else {
-                    Duration::ZERO
-                };
-            }
-        }
-        debug!(
-            "[SyncEngine] Manual offset applied to all entries | offset_seconds: {:.3}",
-            offset_seconds
-        );
-        Ok(SyncResult {
-            offset_seconds,
-            confidence: 1.0,
-            method_used: SyncMethod::Manual,
-            correlation_peak: 1.0,
-            additional_info: Some(json!({
-                "applied_offset": offset_seconds,
-                "entries_modified": subtitle.entries.len(),
-            })),
-            processing_duration: start.elapsed(),
-            warnings: Vec::new(),
-        })
+        super::shift_subtitle_timing(subtitle, offset_seconds)
     }
 
     fn determine_default_method(&self) -> SyncMethod {

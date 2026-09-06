@@ -8,6 +8,7 @@
 //! - [`SyncEngine`] - VAD-based sync engine
 //! - [`SyncMethod`] - Sync method enumeration (VAD and manual)
 //! - [`SyncResult`] - Sync result structure containing offset and confidence
+//! - [`shift_subtitle_timing`] - VAD-independent manual-offset timing transform
 //!
 //! # Usage
 //!
@@ -32,9 +33,13 @@ pub mod engine;
 // Re-export main types
 pub use engine::{MethodSelectionStrategy, SyncEngine, SyncMethod, SyncResult};
 
+use crate::core::formats::Subtitle;
 use crate::core::input::InputPathHandler;
 use crate::error::SubXError;
+use log::debug;
+use serde_json::json;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// Video container extensions recognised when auto-pairing a sync input.
 ///
@@ -293,9 +298,244 @@ pub fn create_default_output_path(input: &Path) -> PathBuf {
     output
 }
 
+/// Shift every subtitle entry's start and end time by a manual offset.
+///
+/// This is the entire manual-offset timing transform, reachable without a
+/// [`SyncEngine`]: `SyncEngine::new` requires a VAD detector even for
+/// callers that only ever apply a manual offset, so a host that never
+/// performs detection would have to satisfy a precondition for a subsystem
+/// it does not use. `SyncEngine::apply_manual_offset` delegates here after
+/// enforcing `sync.max_offset_seconds`, so exactly one implementation of
+/// the shift exists.
+///
+/// A positive offset delays every entry via a checked addition; a negative
+/// offset advances every entry, clamping at [`Duration::ZERO`] rather than
+/// producing negative timestamps.
+///
+/// # Arguments
+///
+/// * `subtitle` - Mutable subtitle data whose entries are shifted in place
+/// * `offset_seconds` - Offset in seconds (positive delays, negative advances)
+///
+/// # Returns
+///
+/// A [`SyncResult`] with the supplied offset, full confidence,
+/// `method_used = SyncMethod::Manual`, an `additional_info` object
+/// recording the applied offset and the number of entries modified, and
+/// the measured processing duration.
+///
+/// # Errors
+///
+/// Returns an [`crate::error::SubXError::AudioProcessing`] error if a
+/// positive offset would overflow any entry's timing (`Duration::MAX`
+/// plus a positive offset).
+///
+/// `sync.max_offset_seconds` is **not** enforced here — this function has
+/// no configuration to read it from. [`SyncEngine::apply_manual_offset`]
+/// is the entry point that enforces the configured maximum; a caller
+/// reaching this function directly is responsible for its own bound.
+///
+/// # Examples
+///
+/// ```
+/// use std::time::Duration;
+/// use subx_core::core::formats::{Subtitle, SubtitleEntry, SubtitleFormatType, SubtitleMetadata};
+/// use subx_core::core::sync::{shift_subtitle_timing, SyncMethod};
+///
+/// let mut subtitle = Subtitle::new(
+///     SubtitleFormatType::Srt,
+///     SubtitleMetadata::default(),
+/// );
+/// subtitle.entries.push(SubtitleEntry::new(
+///     1,
+///     Duration::from_secs(10),
+///     Duration::from_secs(12),
+///     "Hello".to_string(),
+/// ));
+///
+/// let result = shift_subtitle_timing(&mut subtitle, 2.5).unwrap();
+/// assert_eq!(subtitle.entries[0].start_time, Duration::from_secs_f32(12.5));
+/// assert_eq!(result.method_used, SyncMethod::Manual);
+/// assert_eq!(result.confidence, 1.0);
+/// ```
+pub fn shift_subtitle_timing(
+    subtitle: &mut Subtitle,
+    offset_seconds: f32,
+) -> crate::Result<SyncResult> {
+    let start = Instant::now();
+    for entry in &mut subtitle.entries {
+        let offset_dur = Duration::from_secs_f32(offset_seconds.abs());
+        if offset_seconds >= 0.0 {
+            entry.start_time = entry.start_time.checked_add(offset_dur).ok_or_else(|| {
+                SubXError::audio_processing("Invalid offset results in negative time")
+            })?;
+            entry.end_time = entry.end_time.checked_add(offset_dur).ok_or_else(|| {
+                SubXError::audio_processing("Invalid offset results in negative time")
+            })?;
+        } else {
+            // For negative offsets, clamp times to zero instead of erroring on underflow
+            entry.start_time = if entry.start_time > offset_dur {
+                entry.start_time - offset_dur
+            } else {
+                Duration::ZERO
+            };
+            entry.end_time = if entry.end_time > offset_dur {
+                entry.end_time - offset_dur
+            } else {
+                Duration::ZERO
+            };
+        }
+    }
+    debug!(
+        "[SyncEngine] Manual offset applied to all entries | offset_seconds: {:.3}",
+        offset_seconds
+    );
+    Ok(SyncResult {
+        offset_seconds,
+        confidence: 1.0,
+        method_used: SyncMethod::Manual,
+        correlation_peak: 1.0,
+        additional_info: Some(json!({
+            "applied_offset": offset_seconds,
+            "entries_modified": subtitle.entries.len(),
+        })),
+        processing_duration: start.elapsed(),
+        warnings: Vec::new(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::formats::{SubtitleEntry, SubtitleFormatType, SubtitleMetadata};
+
+    // ── shift_subtitle_timing ────────────────────────────────────────────
+
+    fn shift_test_subtitle(entries: Vec<(std::time::Duration, std::time::Duration)>) -> Subtitle {
+        let mut subtitle = Subtitle::new(SubtitleFormatType::Srt, SubtitleMetadata::default());
+        subtitle.entries = entries
+            .into_iter()
+            .enumerate()
+            .map(|(i, (start, end))| {
+                SubtitleEntry::new(i + 1, start, end, format!("line {}", i + 1))
+            })
+            .collect();
+        subtitle
+    }
+
+    #[test]
+    fn test_shift_subtitle_timing_positive_shifts_both_times() {
+        let mut subtitle =
+            shift_test_subtitle(vec![(Duration::from_secs(10), Duration::from_secs(12))]);
+        let result = shift_subtitle_timing(&mut subtitle, 2.5).unwrap();
+        assert_eq!(
+            subtitle.entries[0].start_time,
+            Duration::from_secs_f32(12.5)
+        );
+        assert_eq!(subtitle.entries[0].end_time, Duration::from_secs_f32(14.5));
+        assert_eq!(result.offset_seconds, 2.5);
+        assert_eq!(result.method_used, SyncMethod::Manual);
+        assert_eq!(result.confidence, 1.0);
+    }
+
+    #[test]
+    fn test_shift_subtitle_timing_negative_clamps_at_zero() {
+        // start_time = 1s advanced by -5s clamps to Duration::ZERO.
+        let mut subtitle =
+            shift_test_subtitle(vec![(Duration::from_secs(1), Duration::from_secs(20))]);
+        shift_subtitle_timing(&mut subtitle, -5.0).unwrap();
+        assert_eq!(subtitle.entries[0].start_time, Duration::ZERO);
+        assert_eq!(subtitle.entries[0].end_time, Duration::from_secs_f32(15.0));
+    }
+
+    #[test]
+    fn test_shift_subtitle_timing_negative_boundary_equal_offset_clamps_to_zero() {
+        // start (2s) is below the 5s magnitude and end (5s) equals it —
+        // the strict `>` clamp branch and its `==` boundary, where the
+        // saturating_sub mirror also lands on Duration::ZERO.
+        let mut subtitle =
+            shift_test_subtitle(vec![(Duration::from_secs(2), Duration::from_secs(5))]);
+        shift_subtitle_timing(&mut subtitle, -5.0).unwrap();
+        assert_eq!(subtitle.entries[0].start_time, Duration::ZERO);
+        assert_eq!(subtitle.entries[0].end_time, Duration::ZERO);
+    }
+
+    #[test]
+    fn test_shift_subtitle_timing_positive_overflow_errors() {
+        // end_time = Duration::MAX (the *Subtitle Timing Application*
+        // scenario); the +1s checked_add on it overflows. start < end so
+        // SubtitleEntry::new's own validation is satisfied.
+        let mut subtitle = shift_test_subtitle(vec![(
+            Duration::MAX - Duration::from_secs(1),
+            Duration::MAX,
+        )]);
+        let err = shift_subtitle_timing(&mut subtitle, 1.0).unwrap_err();
+        assert!(matches!(err, SubXError::AudioProcessing { .. }));
+    }
+
+    #[test]
+    fn test_shift_subtitle_timing_empty_subtitle_succeeds() {
+        let mut subtitle = shift_test_subtitle(vec![]);
+        let result = shift_subtitle_timing(&mut subtitle, 3.0).unwrap();
+        assert_eq!(
+            result.additional_info.unwrap()["entries_modified"]
+                .as_u64()
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_shift_subtitle_timing_ignores_max_offset_guard() {
+        // 120s exceeds the default sync.max_offset_seconds (60s) yet the
+        // free function carries no configuration and must not error —
+        // proving the guard belongs to SyncEngine::apply_manual_offset.
+        let mut subtitle =
+            shift_test_subtitle(vec![(Duration::from_secs(1), Duration::from_secs(2))]);
+        let result = shift_subtitle_timing(&mut subtitle, 120.0).unwrap();
+        assert_eq!(result.offset_seconds, 120.0);
+        assert_eq!(
+            subtitle.entries[0].start_time,
+            Duration::from_secs_f32(121.0)
+        );
+    }
+
+    #[test]
+    fn test_apply_manual_offset_delegates_identically_to_shift_subtitle_timing() {
+        use crate::config::TestConfigBuilder;
+
+        let config = TestConfigBuilder::new()
+            .with_vad_enabled(true)
+            .build_config();
+        let engine = SyncEngine::new(config.sync).unwrap();
+
+        let fixture = shift_test_subtitle(vec![
+            (Duration::from_secs(1), Duration::from_secs(3)),
+            (Duration::from_secs(10), Duration::from_secs(14)),
+            (Duration::from_secs(100), Duration::from_secs(120)),
+        ]);
+        let mut via_engine = fixture.clone();
+        let mut via_free_fn = fixture.clone();
+
+        let offset = 2.5f32; // well inside sync.max_offset_seconds
+        let r_engine = engine.apply_manual_offset(&mut via_engine, offset).unwrap();
+        let r_free = shift_subtitle_timing(&mut via_free_fn, offset).unwrap();
+
+        // Identical entry timings…
+        assert_eq!(via_engine.entries.len(), via_free_fn.entries.len());
+        for (a, b) in via_engine.entries.iter().zip(&via_free_fn.entries) {
+            assert_eq!(a.start_time, b.start_time);
+            assert_eq!(a.end_time, b.end_time);
+        }
+        // …and identical SyncResult fields (processing_duration is a
+        // measured wall time and intentionally excluded).
+        assert_eq!(r_engine.offset_seconds, r_free.offset_seconds);
+        assert_eq!(r_engine.confidence, r_free.confidence);
+        assert_eq!(r_engine.method_used, r_free.method_used);
+        assert_eq!(r_engine.correlation_peak, r_free.correlation_peak);
+        assert_eq!(r_engine.additional_info, r_free.additional_info);
+        assert_eq!(r_engine.warnings, r_free.warnings);
+    }
 
     // ── create_default_output_path ───────────────────────────────────────
 

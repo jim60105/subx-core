@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `subx_core::core::sync::shift_subtitle_timing(subtitle, offset_seconds)` — the manual-offset timing transform as a free function, reachable without constructing a `SyncEngine` (whose `new` requires a VAD detector even for manual-offset-only callers). It deliberately does not enforce `sync.max_offset_seconds`. `SyncEngine::apply_manual_offset` now delegates to it after its own guard, so exactly one implementation of the shift exists.
+
+### Changed
+- `SubtitleFormat` declares `Send + Sync` supertraits, which makes `Box<dyn SubtitleFormat>` thread-safe and, in turn, `FormatManager`, `FormatConverter` and `TranslationEngine` `Send + Sync`; the guarantee is asserted at compile time by the `thread_safety` module in `src/core/mod.rs`. In semver terms this is a `trait_added_supertrait` **major** change; it lands inside the 1.0.0 surface rather than against it (the crate is not yet published, so the break has no audience).
+
 ## [1.0.0] - 2026-09-06
 
 First publication of `subx-core`: the core library extracted from [`subx-cli`](https://github.com/jim60105/subx-cli) — the `config`, `core`, `error` and `services` trees migrated at their identical relative paths with `git filter-repo` history, so `git log`/`git blame` cross the repository boundary. The crate is a Cargo workspace member of `subx-cli`, mounted there as a git submodule, and standalone-buildable (no workspace inheritance, no `[workspace]`/`[profile]` tables). Public surface: `subx_core::{config, core, error, services}` plus the twelve `#[macro_export]` configuration test macros, deliberately identical to the pre-split `subx_cli::` paths with only the crate name swapped. `test-support` gates `src/test_support/` so no release artifact compiles it. Licence: GPL-3.0-or-later. Published to crates.io from `subx-cli`'s release workflow via `cargo publish --workspace` — not from this repository.

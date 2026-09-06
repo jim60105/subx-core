@@ -791,12 +791,23 @@ impl StylingInfo {
 /// All parsing and serialization methods should return `crate::Result<T>` to
 /// provide detailed error information about format-specific failures.
 ///
+/// # Implementation Notes
+///
+/// An implementor must be `Send + Sync` — the trait declares both as
+/// supertraits, so a handler holding `Rc`, `RefCell`, `Cell` or a raw
+/// pointer does not compile. The four registered handlers (`AssFormat`,
+/// `VttFormat`, `SrtFormat`, `SubFormat`) are field-less structs and
+/// satisfy the bound trivially. A format handler is a parser: it is
+/// stateless, or it holds configuration. A handler that cannot satisfy
+/// `Send + Sync` is a defect in the handler, not a reason to relax the
+/// bound.
+///
 /// # Examples
 ///
 /// ```rust,ignore
 /// use subx_core::core::formats::{SubtitleFormat, Subtitle};
 ///
-/// struct MyFormat;
+/// struct MyFormat; // field-less, hence Send + Sync
 ///
 /// impl SubtitleFormat for MyFormat {
 ///     fn parse(&self, content: &str) -> crate::Result<Subtitle> {
@@ -832,7 +843,7 @@ impl StylingInfo {
 ///     println!("Parsed {} entries", subtitle.entries.len());
 /// }
 /// ```
-pub trait SubtitleFormat {
+pub trait SubtitleFormat: Send + Sync {
     /// Parse subtitle content into a structured `Subtitle` data structure.
     ///
     /// This method converts raw subtitle file content into the unified

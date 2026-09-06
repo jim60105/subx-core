@@ -35,3 +35,30 @@ pub mod uuidv7;
 
 // Re-export commonly used types
 pub use factory::ComponentFactory;
+
+/// Compile-time thread-safety contract for the orchestration surface.
+///
+/// The list below is the contract, not a record of one change's edits:
+/// every type named here is guaranteed `Send + Sync + 'static`, and a new
+/// public engine, factory or manager type must be added by the change that
+/// adds it (see the `async-runtime-safety` requirement *Library Engine
+/// Types Are `Send` and `Sync`*).
+///
+/// A compile failure on one of these lines means a field of that type lost
+/// its auto traits (an `Rc`, a `RefCell`, or a trait object whose trait
+/// names no `Send`/`Sync` supertraits) — it does not mean the assertion is
+/// wrong. Fix the field, or move the type out of the orchestration surface
+/// deliberately.
+#[cfg(test)]
+mod thread_safety {
+    const fn assert_send_sync<T: Send + Sync + 'static>() {}
+
+    const _: () = assert_send_sync::<crate::core::formats::manager::FormatManager>();
+    const _: () = assert_send_sync::<crate::core::formats::converter::FormatConverter>();
+    const _: () = assert_send_sync::<crate::core::translation::TranslationEngine>();
+    const _: () = assert_send_sync::<crate::core::matcher::MatchEngine>();
+    const _: () = assert_send_sync::<crate::core::sync::SyncEngine>();
+    const _: () = assert_send_sync::<crate::core::ComponentFactory>();
+    const _: () = assert_send_sync::<crate::core::file_manager::FileManager>();
+    const _: () = assert_send_sync::<Box<dyn crate::core::formats::SubtitleFormat>>();
+}
