@@ -44,20 +44,22 @@ presentation code.
 - **Repository:** <https://github.com/jim60105/subx-core>
 - **License:** GPL-3.0-or-later
 - **Crate name:** `subx-core`
-- **API reference:** <https://docs.rs/subx-core> (canonical; `subx-cli`'s
-  library surface is compatibility re-exports of this crate)
+- **API reference:** <https://docs.rs/subx-core> — canonical **once the
+  first release publishes**; until then, this repository's rustdoc
+  (`cargo doc --all-features --no-deps`) is the reference, and `subx-cli`'s
+  library surface is compatibility re-exports of this crate
 
 Its two consumers are [`subx-cli`](https://github.com/jim60105/subx-cli),
 the command-line front-end (which mounts this repository as a git submodule
 and re-exports it), and the Tauri GUI at
 [`jim60105/subx`](https://github.com/jim60105/subx), which depends on this
-crate directly (through its repository until the first crates.io release
+crate directly (through its git repository until the first crates.io release
 lands, through the registry after). A library consumer SHALL depend on
-`subx-core` directly,
-never on `subx-cli`. A standalone clone of this repository is a supported
-workflow — it is exactly how crates.io, docs.rs, and the GUI consume the
-crate — so nothing in this repository may depend on living inside the
-`subx-cli` checkout.
+`subx-core` directly, never on `subx-cli`. A standalone clone of this
+repository is a supported workflow — the GUI consumes it that way today, and
+once the first release publishes it is exactly how crates.io and docs.rs
+will build it — so nothing in this repository may depend on living inside
+the `subx-cli` checkout.
 
 ## Repository Layout
 
@@ -90,8 +92,9 @@ repositories' `AGENTS.md`.
 
 ## Continuous Integration
 
-`.github/workflows/build-test-audit-coverage.yml` runs three jobs on every
-push/PR to `main`:
+`.github/workflows/build-test-audit-coverage.yml` runs three jobs on
+pushes/PRs to `main` (with `paths-ignore: '**/*.md'`, so documentation-only
+changes do not trigger it):
 
 | Job | What it does |
 |---|---|
@@ -157,9 +160,11 @@ be, so an upward reference is *unfixable* rather than merely stale.
 
 The intra-doc link case specifically is a hard build failure, not a style
 rule: `subx-cli` is not a dependency of this crate, so under
-`broken_intra_doc_links = "deny"` a `[subx_cli::...]` link resolves only
-inside the workspace build and breaks the **standalone clone** build that
-crates.io, docs.rs, and the GUI perform.
+`broken_intra_doc_links = "deny"` a `[subx_cli::...]` link resolves in
+**neither** build — there is no dependency edge for it to resolve through in
+the workspace build either — and the deny turns the **standalone clone**
+build that the GUI (and, after the first release, crates.io and docs.rs)
+performs into a documented failure.
 
 Enforcement: the `core_cli_boundary` guard test in the `subx-cli` repository
 (`subx-cli/tests/core_cli_boundary.rs`) walks this crate's `src/` from
@@ -267,8 +272,10 @@ or produce errors.
   contain any bracketed `[subx_cli::...]` link. The CLI is not a core
   dependency, so the deny'd broken intra-doc link turns the standalone core
   documentation build into a build failure. Core documentation may mention
-  CLI behaviour only as backticked prose (`subx_cli`) or a plain GitHub
-  URL, never as an intra-doc link.
+  CLI behaviour only as backticked prose — the hyphen form `subx-cli`; the
+  underscore spelling `subx_cli` is rejected by the layering guard even
+  inside core comments and doctests — or a plain GitHub URL, never as an
+  intra-doc link.
 - **Verify the shared documentation boundary with
   `cargo doc --workspace --all-features`** — not `--no-deps`.
   `cargo doc --no-deps` documents only the local crates without building
@@ -303,7 +310,8 @@ parallel work. Subagents and worker sessions MUST NOT run these themselves:
 needs full-suite or coverage validation, request it from the main agent, who
 runs it once after all sub-agent work is consolidated and before every
 `git commit`. `cargo check` is fine for quick validation. CI generates
-coverage reports on every push, so local coverage is usually unnecessary.
+coverage reports when its workflow runs (note both workflows' `paths-ignore`
+skips documentation-only changes), so local coverage is usually unnecessary.
 
 ## subx-core Manifest Prohibitions
 
@@ -313,8 +321,9 @@ inheritance (`version.workspace = true`, `authors.workspace = true`,
 tables. The superproject root manifest owns the `[profile.release]` settings
 and the shared dependency versions; a workspace table or inheritance in the
 member would stop `cargo build` from working in a standalone clone of the
-library repository, which is a supported workflow (crates.io, docs.rs, and
-the Tauri GUI all consume it that way).
+library repository, which is a supported workflow — the Tauri GUI consumes
+it through a git dependency today, and after the first publication crates.io
+and docs.rs will consume exactly that same standalone tree.
 
 ## Testing Conventions
 
