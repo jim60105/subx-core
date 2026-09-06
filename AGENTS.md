@@ -34,14 +34,28 @@ Instructions for AI coding agents working on **subx-core**.
 ## Project Overview
 
 `subx-core` is the core subtitle processing library of the SubX project,
-written in Rust (edition 2024). It provides subtitle matching, format
-conversion, audio synchronization via Voice Activity Detection (VAD),
-encoding detection, and AI service integrations as a reusable library with no
-binary and no terminal presentation code.
+written in Rust (edition 2024). It provides subtitle parsing and format
+conversion (SRT/ASS/VTT/SUB), AI-powered file matching, audio synchronization
+via Voice Activity Detection (VAD), AI-assisted translation, encoding
+detection, archive extraction, and a dependency-injected configuration
+system — as a reusable library with **no binary target** and no terminal
+presentation code.
 
 - **Repository:** <https://github.com/jim60105/subx-core>
 - **License:** GPL-3.0-or-later
 - **Crate name:** `subx-core`
+- **API reference:** <https://docs.rs/subx-core> (canonical; `subx-cli`'s
+  library surface is compatibility re-exports of this crate)
+
+Its two consumers are [`subx-cli`](https://github.com/jim60105/subx-cli),
+the command-line front-end (which mounts this repository as a git submodule
+and re-exports it), and the Tauri GUI at
+[`jim60105/subx`](https://github.com/jim60105/subx), which depends on the
+published crate. A library consumer SHALL depend on `subx-core` directly,
+never on `subx-cli`. A standalone clone of this repository is a supported
+workflow — it is exactly how crates.io, docs.rs, and the GUI consume the
+crate — so nothing in this repository may depend on living inside the
+`subx-cli` checkout.
 
 ## Repository Layout
 
@@ -55,19 +69,6 @@ modes working:
   committed in this repository, then the submodule pointer (gitlink) in
   `subx-cli` is bumped in a second commit. A `subx-cli` commit that depends on
   an unpushed or unpinned `subx-core` commit is non-conforming.
-- **`Cargo.toml` must never contain a `[workspace]` table.** This crate is a
-  workspace *member* inside `subx-cli`; a member cannot also be a root, and a
-  nested `[workspace]` is a hard Cargo error, not a warning.
-- **No workspace inheritance of any kind.** No `version.workspace = true`,
-  `authors.workspace = true`, `<dep>.workspace = true`, or
-  `[lints] workspace = true`. All of those resolve inside `subx-cli`'s
-  workspace but break a standalone `git clone` of this repository — which is
-  exactly how crates.io consumers, `docs.rs`, and the Tauri GUI see this crate.
-  Lint tables are therefore written out literally in `Cargo.toml` and kept in
-  agreement with `subx-cli`'s by review.
-- **No `[profile.*]` tables.** Cargo ignores profiles in a non-root workspace
-  member and warns on every build when one is present. Release/dev profiles
-  live in `subx-cli/Cargo.toml` only.
 - **Every configuration file is this repository's own.** `.gitignore`,
   `.gitattributes`, `rustfmt.toml`, `.config/nextest.toml`,
   `.codegraph/.gitignore`, `LICENSE`, and the committed `Cargo.lock` apply to
@@ -79,6 +80,11 @@ modes working:
   clone; `git config submodule.recurse true` to keep the submodule working
   tree following the pointer on `git pull`/`git checkout` (per-clone setting;
   does not apply to `git clone`).
+
+The `Cargo.toml` prohibitions that keep the standalone clone building (no
+`[workspace]` table, no workspace inheritance, no `[profile.*]` tables) are
+recorded in the shared conventions region below, verbatim in both
+repositories' `AGENTS.md`.
 
 ## Continuous Integration
 
@@ -113,7 +119,9 @@ single `cargo publish --workspace` triggered by a `subx-cli` `v*` tag, whose
 `Assert the submodule pointer is on subx-core main` step makes a push of this
 repository's `main` a precondition of any release).
 
-## Module Guide
+## Architecture
+
+### Module Guide
 
 The library sources migrated from `subx-cli` at their identical relative
 paths:
@@ -121,23 +129,35 @@ paths:
 | Path | Owns |
 |---|---|
 | `src/config/` | The configuration system: `Config`, the `ConfigService` DI trait, `ProductionConfigService`, the `Test*` utilities, `field_validator`, `validator`, and the twelve `#[macro_export]` test macros (`test_macros.rs`, reachable at the crate root) |
-| `src/core/` | The processing engines: `formats` (SRT/ASS/VTT/SUB + `encoding`), `matcher`, `sync`, `translation`, `parallel`, `archive`, `input`, `report` (the `Reporter` seam), `lock`, `file_manager`, `factory`, `language`, `uuidv7`, `fs_util` |
+| `src/core/` | The processing engines: `formats` (SRT/ASS/VTT/SUB + `encoding`), `matcher`, `sync`, `translation`, `parallel`, `archive`, `input`, `lock`, `file_manager`, `factory`, `language`, `uuidv7`, `fs_util` |
+| `src/core/report/` | The `Reporter` seam: structured progress / AI-usage events (`ProgressEvent`) a host — the CLI or the GUI — renders; core never presents directly |
 | `src/error.rs` | `SubXError`, its helper constructors and `From` conversions, and the machine-readable contract (`category`, `machine_code`, `hint`) |
 | `src/services/` | External integrations: `ai` (providers, retry, security, error sanitizer), `audio`, `vad` |
+| `src/test_support/` | Shared test fixtures (config builder, file managers, mock OpenAI/Azure helpers, response generators), gated by the `test-support` feature — never compiled into a release artifact |
+
+There is no CLI layer and no command layer here; argument parsing, terminal
+presentation, exit codes, and user-facing prose belong to the consumer's
+binary.
 
 Public module paths are frozen at their pre-split `subx_cli::` shapes (only
 the crate name differs) — see the crate-level rustdoc in `src/lib.rs` before
 reshaping anything.
 
-## Dependency Direction — A One-Way Boundary
+### Dependency Direction — A One-Way Boundary
 
-**No file under `src/` may name `subx_cli`, `crate::cli` or `crate::commands`
-anywhere in a line — not in code, not in an intra-doc link, not in a
-doctest.** The dependency between the two repositories points downward only
-(`subx-cli` depends on `subx-core`); there is no dependency edge in the other
-direction and there never will be, so an upward reference is *unfixable*
-rather than merely stale — and under `broken_intra_doc_links = "deny"` an
-upward doc link is a hard build failure with no repair short of deleting it.
+**`subx-core` SHALL NOT name `subx_cli` anywhere: not in code, not in a
+`use`, not in a doc comment, and not in an intra-doc link.** No file under
+`src/` may contain `subx_cli`, `crate::cli` or `crate::commands` on any
+line, comments and doctests included. The dependency between the two
+repositories points downward only (`subx-cli` depends on `subx-core`);
+there is no dependency edge in the other direction and there never will
+be, so an upward reference is *unfixable* rather than merely stale.
+
+The intra-doc link case specifically is a hard build failure, not a style
+rule: `subx-cli` is not a dependency of this crate, so under
+`broken_intra_doc_links = "deny"` a `[subx_cli::...]` link resolves only
+inside the workspace build and breaks the **standalone clone** build that
+crates.io, docs.rs, and the GUI perform.
 
 Enforcement: the `core_cli_boundary` guard test in the `subx-cli` repository
 (`subx-cli/tests/core_cli_boundary.rs`) walks this crate's `src/` from
@@ -158,11 +178,19 @@ or produce errors.
 | Format | `cargo fmt` |
 | Lint | `cargo clippy -- -D warnings` |
 | Run tests | `cargo nextest run \|\| true` |
+| Local quality gate | `scripts/quality_check.sh [profile]` (optional profile name: `default`, `ci`, `full`) |
 | Doc build | `cargo doc --all-features --no-deps --document-private-items` |
 | Doc tests | `cargo test --doc --all-features` |
 
 ### Important Notes
 
+- **`scripts/quality_check.sh` is this repository's local gate** — fmt,
+  `check --all-features`, lib-only clippy `-D warnings`, `cargo doc`,
+  doctests, and `nextest --profile "${1:-default}" --features slow-tests`.
+  It is a **strict subset** of the authoritative gate: the superproject's
+  `subx-cli/scripts/quality_check.sh` is what actually decides a change, run
+  there at the moment the submodule pointer is bumped. A green standalone
+  run is necessary, never sufficient.
 - **Use `cargo nextest run || true` for tests**, never `cargo test` (except
   for doc tests). The `|| true` prevents shell abort due to a known nextest
   issue in this project — **you must still inspect the output and treat any
@@ -171,39 +199,7 @@ or produce errors.
   warning before submitting code.
 - Required tooling: Rust stable, `rustfmt`, `clippy`, `cargo-nextest`.
 
-### CPU-Intensive Operations — Main Agent Only
-
-**NEVER** run the following commands in sub-agents or in parallel:
-
-- `cargo nextest run` without a `--filter-expr` (runs the full test suite)
-
-These operations are CPU-intensive and will saturate all cores. Running them
-in multiple sub-agents simultaneously will cause system overload, timeouts,
-and unreliable results.
-
-**Correct workflow:**
-
-- Sub-agents writing tests should run only their own scoped tests using
-  `cargo nextest run --filter-expr 'test(module_name)' || true`.
-- The **main agent** runs the full test suite once after all sub-agents have
-  finished and changes are consolidated.
-- The main agent runs the checks **before every `git commit`** to ensure all
-  changes pass together.
-
-## Coding Conventions
-
-### General Rules
-
-- All code comments and rustdoc must be written in **English**.
-- Do not introduce new `#[deprecated]` attributes. When removing
-  functionality, delete the item and update all call sites.
-- Unimplemented code must be marked with `// TODO`. Unless requirements
-  explicitly permit phased implementation, all TODOs must be resolved
-  before submitting.
-- Never parse or hand-edit `Cargo.lock` — it is managed by Cargo.
-- Formatting: `rustfmt.toml` sets edition 2024 with max width 100 columns.
-
-### Error Handling
+## Error Handling
 
 - Use `SubXError` variants from `src/error.rs` — never invent ad-hoc error
   types.
@@ -213,10 +209,110 @@ and unreliable results.
   render messages through `Display` here and never call binary-half
   presentation helpers.
 
+## Cargo Features
+
+- `default = []` — no optional features are enabled by default.
+- `archive-rar = ["dep:unrar"]` — **this manifest owns the real gate**;
+  `subx-cli`'s `archive-rar` is only a pass-through
+  (`["subx-core/archive-rar"]`).
+- `slow-tests = []` — gates long-running tests; `subx-cli`'s is again a
+  pass-through.
+- `test-support = ["dep:wiremock", "dep:hound"]` — exposes
+  `src/test_support/` and pulls in the HTTP mock server and WAV writer only
+  that module needs. `subx-cli` never declares it as a feature and enables
+  it only through `[dev-dependencies]`.
+
+<!-- SHARED_CONVENTIONS_START -->
+<!-- The text between these two markers (inclusive) is byte-identical in
+     subx-cli/AGENTS.md and subx-core/AGENTS.md. The superproject's quality
+     gate enforces it: scripts/quality_check.sh --check-spec-governance
+     (quality_check.ps1 -CheckSpecGovernance), exit code 2 on failure.
+     Edit this region in BOTH repositories in the same change or the gate
+     turns red. The tool-managed CODEGRAPH block lives outside the region
+     in both files. -->
+
+## Coding Conventions
+
+### General Rules
+
+- All code comments and rustdoc must be written in **English**.
+- Do not introduce new `#[deprecated]` attributes. When removing
+  functionality, delete the item and update all call sites. Some legacy
+  fields in `SyncConfig` still carry `#[deprecated]` for backward
+  compatibility — leave those as-is unless actively cleaning them up.
+- Unimplemented code must be marked with `// TODO`. Unless requirements
+  explicitly permit phased implementation, all TODOs must be resolved
+  before submitting.
+- Never parse or hand-edit `Cargo.lock` — it is managed by Cargo.
+- Formatting: `rustfmt.toml` sets edition 2024 with max width 100 columns.
+
 ### Naming Conventions
 
 - Modules: `snake_case`.
 - Factory methods: `create_*` on `ComponentFactory`.
+
+## Documentation Conventions
+
+- Write rustdoc in **English** for all public APIs.
+- Required sections for public functions: `# Arguments`, `# Returns`,
+  `# Errors`, `# Examples`.
+- Include `# Panics` and `# Safety` sections when applicable.
+- All doc examples must compile — verified by `cargo test --doc --all-features`.
+- Use intra-doc links: `` [`crate::module::Type`] ``. Broken links are
+  denied (`broken_intra_doc_links = "deny"` in `Cargo.toml`).
+- **Cross-crate rustdoc links are one-way**: the CLI's rustdoc may link into
+  the core with absolute `subx_core::...` paths; core rustdoc SHALL NOT
+  contain any bracketed `[subx_cli::...]` link. The CLI is not a core
+  dependency, so the deny'd broken intra-doc link turns the standalone core
+  documentation build into a build failure. Core documentation may mention
+  CLI behaviour only as backticked prose (`subx_cli`) or a plain GitHub
+  URL, never as an intra-doc link.
+- **Verify the shared documentation boundary with
+  `cargo doc --workspace --all-features`** — not `--no-deps`.
+  `cargo doc --no-deps` documents only the local crates without building
+  registry dependencies, so it can report success while generating no
+  `subx_core` pages at all and leaving every re-export link pointing at a
+  page that does not exist.
+
+### Changelog Convention
+
+Follow [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) with
+[Semantic Versioning](https://semver.org/). Use sections: `### Added`,
+`### Changed`, `### Fixed`, `### Removed`, `### Documentation`. Every
+user-facing change (including CI/release behaviour) gets an entry in this
+repository's `CHANGELOG.md` under the top `## [Unreleased]` header, and every
+released entry lives under its own `## [VERSION]` header. `subx-cli`'s release
+workflow parses that repository's `## [VERSION]` headers to generate release
+notes — always add a properly formatted entry for every release.
+
+## CPU-Intensive Operations — Main Agent Only
+
+Running the full test suite or coverage check hogs CPU and interferes with
+parallel work. Subagents and worker sessions MUST NOT run these themselves:
+
+- `scripts/quality_check.sh` (every profile; the `.ps1` port exists in the
+  `subx-cli` repository) — the full check suite
+- `scripts/check_coverage.sh` / `.ps1` — the instrumented full-suite coverage
+  run (`subx-cli` repository only)
+- bare `cargo nextest run` without a `--filter-expr`
+
+**Correct workflow:** subagents run only their own scoped tests with
+`cargo nextest run --filter-expr 'test(module_name)' || true`. When a task
+needs full-suite or coverage validation, request it from the main agent, who
+runs it once after all sub-agent work is consolidated and before every
+`git commit`. `cargo check` is fine for quick validation. CI generates
+coverage reports on every push, so local coverage is usually unnecessary.
+
+## subx-core Manifest Prohibitions
+
+`subx-core/Cargo.toml` SHALL NOT contain a `[workspace]` table, workspace
+inheritance (`version.workspace = true`, `authors.workspace = true`,
+`<dep>.workspace = true`, `[lints] workspace = true`), or `[profile.*]`
+tables. The superproject root manifest owns the `[profile.release]` settings
+and the shared dependency versions; a workspace table or inheritance in the
+member would stop `cargo build` from working in a standalone clone of the
+library repository, which is a supported workflow (crates.io, docs.rs, and
+the Tauri GUI all consume it that way).
 
 ## Testing Conventions
 
@@ -229,6 +325,12 @@ and unreliable results.
 - **All tests must be parallel-safe** and deterministic.
 - **Async tests** use `#[tokio::test]`.
 
+Repository-specific test infrastructure, test patterns, and test
+organisation are the Test Infrastructure, Test Patterns, and Test
+Organization sections immediately below this shared region.
+
+<!-- SHARED_CONVENTIONS_END -->
+
 ### Test Infrastructure
 
 | Helper | Location | Purpose |
@@ -236,6 +338,12 @@ and unreliable results.
 | `TestConfigService` | `src/config/test_service.rs` | Isolated config without filesystem I/O |
 | `TestConfigBuilder` | `src/config/builder.rs` | Fluent builder for test configs |
 | `TestEnvironmentProvider` | `src/config/environment.rs` | In-memory env vars for isolated testing |
+| `src/test_support/` | behind the `test-support` feature | Cross-repository shared fixtures: config builder, file managers, mock OpenAI/Azure helpers, response generators |
+
+This crate's own integration tests reach `test_support` through the
+path-only self dev-dependency (`subx-core = { path = "." }` under
+`[dev-dependencies]`): an integration test links the library as an external
+crate, which `#[cfg(test)]` never covers.
 
 ### Test Patterns
 
@@ -255,19 +363,17 @@ async fn test_feature() {
 ### Test Organization
 
 - **Unit tests:** Inline `#[cfg(test)] mod tests` in source files.
-- **Integration tests:** `tests/*.rs`, one file per feature area. Import
-  shared helpers via `mod common;` at the top.
-- **Shared helpers:** `tests/common/` — mocks, generators, fixtures.
-
-## Documentation Conventions
-
-- Write rustdoc in **English** for all public APIs.
-- Required sections for public functions: `# Arguments`, `# Returns`,
-  `# Errors`, `# Examples`.
-- Include `# Panics` and `# Safety` sections when applicable.
-- All doc examples must compile — verified by `cargo test --doc --all-features`.
-- Use intra-doc links: `` [`crate::module::Type`] ``. Broken links are
-  denied (`broken_intra_doc_links = "deny"` in `Cargo.toml`).
+- **Integration tests:** `tests/*.rs`, one file per feature area. The tree
+  is **flat** — Cargo auto-discovers `tests/*.rs` only, so never park a test
+  file in a `tests/` subdirectory (the superproject's shim guard fails the
+  build if one appears).
+- **Fixtures:** `tests/fixtures/` (parser fixtures under
+  `tests/fixtures/formats/`) — every fixture and asset read resolves from
+  `env!("CARGO_MANIFEST_DIR")`, never the working directory.
+- **Shared helpers:** come from `subx_core::test_support`, not a
+  `tests/common/`.
+- **Benchmarks:** `benches/` using Criterion; registered benches are
+  `retry_performance` and `file_id_generation_bench`.
 
 ## Configuration System
 
@@ -298,7 +404,7 @@ in `src/config/service.rs` — check the implementation if a specific
 override doesn't work as expected.
 
 Workspace override: `SUBX_WORKSPACE` or `general.workspace` config changes
-the working directory before command dispatch.
+the working directory before the consumer dispatches a command.
 
 ### Config Sections
 
@@ -319,12 +425,34 @@ New configuration keys must be added to all of the following:
 3. `src/config/field_validator.rs` — field-level validation
 4. `src/config/validator.rs` — section-level validation
 
+The fifth checklist destination, the user-facing `docs/configuration-guide.md`,
+lives in the `subx-cli` repository; see that repository's `AGENTS.md` for the
+full five-destination rule.
+
 ## OpenSpec and Project Skills
 
-Specification governance for this repository is currently owned by the
-`subx-cli` repository's `openspec/` directory; `openspec init` for this
-repository is a planned later step of the two-crate split. Author changes in
-`subx-cli`'s OpenSpec until then.
+`subx-core/openspec/` is an **independent OpenSpec root** that specifies this
+crate. The parent repository's tooling never descends into the submodule:
+`openspec validate`/`list` run at `subx-cli`'s root report only that root's
+specs, and the same commands run from inside this directory resolve this
+root. A change resolves against exactly one root — run its commands from
+inside the repository that owns it. `openspec/config.yaml` here is
+byte-identical to the unmodified `openspec init` template; do not hand-edit
+it.
+
+Twelve capability names (`cache-management`, `component-factory`,
+`configuration-management`, `encoding-detection`, `error-handling`,
+`format-conversion`, `input-path-handling`, `parallel-processing`,
+`secrets-protection`, `subtitle-matching`, `subtitle-translation`,
+`timeline-sync`) appear in **both** trees by design — each is one half of
+one capability split along the crate boundary, recorded in
+`subx-cli/openspec/split-capabilities.txt`. Work spanning both repositories
+is authored as **two** changes, one per root, each `## Why` naming the other
+as its other half. The rule set every move is checked against
+(`spec-governance`) stays in `subx-cli`; the superproject's
+`scripts/quality_check.sh --check-spec-governance` enforces the split record
+and the byte-identical shared conventions region of these two `AGENTS.md`
+files.
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph
