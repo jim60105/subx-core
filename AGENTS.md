@@ -93,7 +93,7 @@ repositories' `AGENTS.md`.
 ## Continuous Integration
 
 `.github/workflows/build-test-audit-coverage.yml` runs three jobs on
-pushes/PRs to `main` (with `paths-ignore: '**/*.md'`, so documentation-only
+pushes/PRs to `master` (with `paths-ignore: '**/*.md'`, so documentation-only
 changes do not trigger it):
 
 | Job | What it does |
@@ -105,8 +105,8 @@ changes do not trigger it):
 Two rules fall out of this:
 
 - **The pointer is release load-bearing.** A `subx-cli` tag's release build
-  compiles the gitlink commit, not `main`. The commit you point at must be
-  this repository's `main` HEAD (or an ancestor of it) whose CI you have
+  compiles the gitlink commit, not `master`. The commit you point at must be
+  this repository's `master` HEAD (or an ancestor of it) whose CI you have
   seen pass.
 - **No coverage threshold gate exists here, on purpose.** The 90% core floor
   (and the 75% workspace / 82% CLI floors) are enforced in `subx-cli`'s
