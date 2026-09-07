@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+    # Standalone checkout by design: this repository has no submodules, and
+    # the tree this job tags and the tree `publish` uploads below are the
+    # same tree crates.io consumers, docs.rs and the Tauri GUI
+    # (jim60105/subx) resolve. That is the tree the release must name.
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Extract changelog content
+      id: extract_changelog
+      run: |
+        # Extract the tagged version's changelog content from this
+        # repository's own CHANGELOG.md — the same extraction shape
+        # subx-cli's release workflow uses, over this crate's own record.
+        VERSION="${{ github.ref_name }}"
+        # Remove 'v' prefix if present
+        VERSION_NUM="${VERSION#v}"
+
+        # Find the section for this version and extract content until next version or end
+        awk "/^## \[$VERSION_NUM\]/{flag=1; next} /^## \[/{if(flag) exit} flag" CHANGELOG.md > release_notes.md
+
+        # If no specific version found, use a default message
+        if [ ! -s release_notes.md ]; then
+          echo "Release $VERSION" > release_notes.md
+        fi
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v3
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        draft: false
+        # Tag names containing `-` are treated as pre-releases (e.g.
+        # `vX.Y.Z-rc.1`, `-beta.N`, `-alpha.N`) so `releases/latest` never
+        # serves an RC build as the default download. Stable semver tags
+        # (`vX.Y.Z`) remain non-prerelease. Mirrors the superproject's rule.
+        prerelease: ${{ contains(github.ref_name, '-') }}
+        body_path: release_notes.md
+
+  publish-crates:
+    name: Publish subx-core to crates.io
+    runs-on: ubuntu-latest
+    # Skip pre-release tags (e.g., vX.Y.Z-rc.1, -beta.N, -alpha.N) so RC
+    # validation never publishes a pre-release version to crates.io —
+    # the rule the superproject's publish job applies, mirrored here.
+    if: ${{ !contains(github.ref_name, '-') }}
+    # REQUIRES the CARGO_REGISTRY_TOKEN secret to exist in THIS repository's
+    # GitHub Actions secrets configuration. It is configured (the
+    # superproject and this repository each carry their own copy); the step
+    # below reads this repository's copy — nothing crosses a repository
+    # boundary.
+    #
+    # RECOVERY — read before re-running anything. A crates.io upload is
+    # irreversible: an accepted version can never be re-uploaded, only
+    # yanked. This job performs exactly ONE upload, with every probe below
+    # run before it, so the half-published state a multi-member workspace
+    # publish can create cannot occur here. If the publish step itself
+    # fails, check the sparse index before touching anything: if
+    # `subx-core@<version>` is listed, the crate IS published and a re-run
+    # would only produce a rejected duplicate. Fix the cause and ship a new
+    # version. A defective published artifact is yanked and superseded by a
+    # new release — never repaired by re-publishing.
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        # Full history so Cargo's VCS metadata and the dirty check see the
+        # tag context completely (same rule as the superproject's publish
+        # job). No `submodules:` option — this repository has none.
+        fetch-depth: 0
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    # No Cargo version floor: the >= 1.90 assertion in subx-cli's publish
+    # job existed solely because `cargo publish --workspace` requires it.
+    # This job runs `cargo publish -p`, which long predates that floor, and
+    # asserting a floor the chosen command does not need is theatre. See
+    # openspec/changes/publish-subx-core-from-own-ci design.md Decision 4.
+
+    # The standalone-tree equivalent of the superproject's submodule
+    # cleanliness assertion: the published archive must correspond to a
+    # committed tree. A dirty tree here is a checkout/runner bug — name it
+    # as such instead of letting Cargo report a generic error.
+    - name: Assert the tree is clean
+      run: |
+        test -z "$(git status --porcelain)" || {
+          echo "::error::working tree is not clean (unexpected on a fresh tag checkout; refusing to publish a tree that corresponds to no commit)"
+          git status --porcelain
+          exit 1
+        }
+
+    # Mechanical guard, not a convention: the publish flag "--allow-<d>irty"
+    # (written split so this guard does not match itself) records
+    # "dirty": true in the published archive's .cargo_vcs_info.json
+    # permanently, asserting the crate corresponds to no commit. There is no
+    # correct use of it here, so a workflow that ever contains it fails the
+    # release. The [-] class is load-bearing: a plain pattern would match
+    # this step's own grep line and fail every release. (Byte-for-byte the
+    # guard the superproject runs.)
+    - name: Assert allow-dirty is absent
+      run: |
+        grep -rn -- '--allow[-]dirty' .github/workflows/ && exit 1
+        echo "no allow-dirty publish flag in any workflow"
+
+    # The tag must name the manifest version, and the registry must not
+    # already hold it. A tag naming an already-published version is a
+    # mistake; fail loudly instead of uploading a guaranteed rejection or
+    # an accidental duplicate.
+    - name: Assert the tag matches the manifest and is not already published
+      run: |
+        CORE_VER=$(cargo metadata --no-deps --format-version 1 \
+          | jq -r '.packages[] | select(.name=="subx-core") | .version')
+        if [ "v${CORE_VER}" != "${GITHUB_REF_NAME}" ]; then
+          echo "::error::tag ${GITHUB_REF_NAME} does not match subx-core's manifest version v${CORE_VER}"
+          exit 1
+        fi
+        if curl -sf "https://index.crates.io/su/bx/subx-core" \
+             | jq -sr '.[].vers' | grep -qx "$CORE_VER"; then
+          echo "::error::subx-core@${CORE_VER} is already published; this tag is a mistake"
+          exit 1
+        fi
+
+    # Full package-and-verify cycle, no upload: catches a missing field, an
+    # exclude list that drops a needed file, or a manifest that does not
+    # survive normalisation — before the first irreversible step.
+    - name: Dry run
+      run: cargo publish -p subx-core --dry-run
+
+    - name: Publish to crates.io
+      run: cargo publish -p subx-core --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

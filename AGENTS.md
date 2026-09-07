@@ -117,12 +117,20 @@ Two rules fall out of this:
   codecov). The first such measurement is recorded in `CHANGELOG.md`:
   **90.62%** lines (19,028/20,998, single instrumented `ci`-profile run).
 
-There is no release workflow in this repository and none is planned: this
-repository contains only `build-test-audit-coverage.yml`. crates.io
-publication happens exclusively from `subx-cli`'s `publish-crates` job (a
-single `cargo publish --workspace` triggered by a `subx-cli` `v*` tag, whose
-`Assert the submodule pointer is on subx-core main` step makes a push of this
-repository's `main` a precondition of any release).
+This repository publishes `subx-core` to crates.io itself:
+`release.yml` fires on a `v*` tag here, creates the GitHub Release from the
+matching `## [VERSION]` section of this repository's `CHANGELOG.md`, and
+runs `cargo publish -p subx-core --token $CARGO_REGISTRY_TOKEN` (the secret
+is configured in this repository's Actions secrets) after a clean-tree
+assertion, an `--allow-dirty` absence guard, a tag-matches-manifest
+assertion, an already-published index probe, and a `--dry-run`. `subx-cli`
+does not publish on this library's behalf — it is not an umbrella project;
+the crate's other consumer (the Tauri GUI at `jim60105/subx`) depends on
+this repository directly. The release ordering contract: tag this
+repository first; `subx-cli`'s publish job probes the crates.io index for a
+published `subx-core` satisfying its caret requirement and refuses the tag
+until one exists. Pre-release tags (containing `-`) create a prerelease
+GitHub Release but skip publication, as in the superproject.
 
 ## Architecture
 

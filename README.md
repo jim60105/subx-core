@@ -1,6 +1,8 @@
 # subx-core
 
 [![Build, Test, Audit & Coverage](https://github.com/jim60105/subx-core/actions/workflows/build-test-audit-coverage.yml/badge.svg)](https://github.com/jim60105/subx-core/actions/workflows/build-test-audit-coverage.yml)
+[![crates.io](https://img.shields.io/crates/v/subx-core.svg)](https://crates.io/crates/subx-core)
+[![docs.rs](https://img.shields.io/docsrs/subx-core)](https://docs.rs/subx-core)
 
 Core subtitle processing library for [SubX](https://github.com/jim60105/subx-cli).
 
@@ -37,9 +39,11 @@ this repository ships no installer and documents no commands.
 
 ## Installation
 
-The crate is published together with `subx-cli` releases; until its first
-release lands on crates.io, depend on the git URL (the published version line
-below is what the caret above expects):
+This repository publishes the crate to crates.io from **its own release
+tag** (a `v*` tag here fires this repository's release workflow — `subx-cli`
+does not publish on the library's behalf). Until that first tag is cut and
+its publication run completes, depend on the git URL (the published version
+line below is what the caret above expects):
 
 ```toml
 [dependencies]
