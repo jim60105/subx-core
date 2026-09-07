@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The repository's default branch is now `master`** (renamed from `main`).
+  The CI workflow's push/PR triggers, the pointer rule in `AGENTS.md`, and the
+  superproject's `.gitmodules` referent and submodule-pointer assertions all
+  follow the new name. No API or behaviour change for consumers; git-URL
+  consumers that pin `branch = "main"` should switch to `branch = "master"`.
+
+### Documentation
+- README, `AGENTS.md` and the pending-release wording corrected against the
+  review of the split changes: the standalone-clone contract, the own-tag
+  release contract, and the CI job set now describe what actually exists.
+
 ## [1.0.0] - 2026-09-06
 
 First release of `subx-core` — the subtitle processing engine behind
@@ -81,3 +93,6 @@ surface described below is frozen for the 1.0 release line.
 - `README.md` and `AGENTS.md` written for standalone library consumers: the
   two consumers of the crate, the supported standalone-clone workflow, the
   feature flags, and the module guide including the reporting seam.
+
+[Unreleased]: https://github.com/jim60105/subx-core/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jim60105/subx-core/releases/tag/v1.0.0
