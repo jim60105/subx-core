@@ -7,35 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- **The repository's default branch is now `master`** (renamed from `main`).
-  The CI workflow's push/PR triggers, the pointer rule in `AGENTS.md`, and the
-  superproject's `.gitmodules` referent and submodule-pointer assertions all
-  follow the new name. No API or behaviour change for consumers; git-URL
-  consumers that pin `branch = "main"` should switch to `branch = "master"`.
+## [1.0.1] - 2026-11-14
 
-### Fixed
-- **Archive extraction now runs on `zip` 9.** Extraction still walks entries
-  itself (the crate never calls `ZipArchive::extract`), but the pinned `zip`
-  8.6.0 carried the `extract()` advisories the audit job flagged. `zip` 9
-  changed `ZipFile::name()` to return `ZipResult<Cow<'_, str>>`, so the
-  extractor decodes the name once and falls back to the raw bytes for its
-  diagnostics instead of aborting on an undecodable entry.
-- **The committed lockfile resolves to patched releases for every advisory
-  the security audit reported:** `rustls`, `rustls-webpki`,
-  `webpki-root-certs`, `quinn-proto`, `quinn-udp`, `ctutils`,
-  `zstd`/`zstd-safe`/`zstd-sys` and `zip` all moved to their first patched
-  versions.
-- **The Windows CI leg pre-creates the `ort-sys` DLL destination directory.**
-  `ort-sys` 2.0.0-rc.10 (pinned by `voice_activity_detector`) copies its
-  downloaded DLLs into `target/debug/build/examples` without creating it, so a
-  cold `target` — which any `Cargo.lock` change produces, because the build
-  cache is keyed on the lockfile hash — panicked before the tests started.
+### Changed
+- **The default branch is now `master`** (renamed from `main`). A git
+  dependency that pins `branch = "main"` must switch to `branch = "master"`;
+  registry consumers are unaffected.
+- **Archive extraction now skips an entry whose stored name cannot be
+  decoded**, reporting it as a warning instead of extracting it under a
+  raw-byte path.
+- **Archive support now resolves `zip` 9 instead of the 8.x line.** A consumer
+  that pins `zip` itself must allow 9.x; the crate's extraction API is
+  unchanged.
+- **Minimum toolchain: Rust 1.88.** `zip` 9 declares that floor (the crate
+  itself still uses edition 2024).
+
+### Security
+- **Every advisory reported against the committed dependency graph is
+  cleared.** Archive extraction no longer resolves the `zip` releases carrying
+  the `extract()` symlink and permission advisories (the crate walks entries
+  itself and never calls those APIs), and the lockfile now pins patched
+  `rustls`, `rustls-webpki`, `webpki-root-certs`, `quinn-proto`, `quinn-udp`,
+  `ctutils` and `zstd`/`zstd-safe`/`zstd-sys` releases.
 
 ### Documentation
-- README, `AGENTS.md` and the pending-release wording corrected against the
-  review of the split changes: the standalone-clone contract, the own-tag
-  release contract, and the CI job set now describe what actually exists.
+- README and `AGENTS.md` now state the standalone-clone contract, the
+  own-tag release contract and the CI job set as they are actually
+  implemented.
 
 ## [1.0.0] - 2026-09-06
 
@@ -112,5 +110,6 @@ surface described below is frozen for the 1.0 release line.
   two consumers of the crate, the supported standalone-clone workflow, the
   feature flags, and the module guide including the reporting seam.
 
-[Unreleased]: https://github.com/jim60105/subx-core/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jim60105/subx-core/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/jim60105/subx-core/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jim60105/subx-core/releases/tag/v1.0.0
