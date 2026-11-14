@@ -8,6 +8,11 @@ use log::{debug, warn};
 
 use super::common::ExtractionLimits;
 
+/// Reports an entry that extraction refused, without aborting the archive.
+fn warn_skipped(reason: &str, archive: &Path, name: &str) {
+    warn!("Skipping {reason} entry in {}: {name}", archive.display());
+}
+
 /// Extracts a ZIP archive to `dest_dir`.
 ///
 /// Validates each entry against path traversal, rejects symlinks and
@@ -39,12 +44,13 @@ pub(super) fn extract_zip(archive_path: &Path, dest_dir: &Path) -> io::Result<Ve
             continue;
         }
 
+        // zip 9 decodes the stored name and reports failure as an error. The
+        // log line must never turn one malformed header into an aborted
+        // extraction, so it reports the raw bytes instead.
+        let entry_name = String::from_utf8_lossy(entry.name_raw());
+
         if entry.is_symlink() {
-            warn!(
-                "Skipping symlink entry in archive {}: {}",
-                archive_path.display(),
-                entry.name()
-            );
+            warn_skipped("symlink", archive_path, &entry_name);
             continue;
         }
 
@@ -54,11 +60,7 @@ pub(super) fn extract_zip(archive_path: &Path, dest_dir: &Path) -> io::Result<Ve
         let entry_path = match entry.enclosed_name() {
             Some(p) => p.to_path_buf(),
             None => {
-                warn!(
-                    "Skipping path-traversal entry in archive {}: {}",
-                    archive_path.display(),
-                    entry.name()
-                );
+                warn_skipped("path-traversal", archive_path, &entry_name);
                 continue;
             }
         };
@@ -66,11 +68,7 @@ pub(super) fn extract_zip(archive_path: &Path, dest_dir: &Path) -> io::Result<Ve
         let target_path = dest_dir.join(&entry_path);
         if let Ok(canonical) = target_path.canonicalize() {
             if !canonical.starts_with(&dest_canonical) {
-                warn!(
-                    "Skipping path-traversal entry in archive {}: {}",
-                    archive_path.display(),
-                    entry.name()
-                );
+                warn_skipped("path-traversal", archive_path, &entry_name);
                 continue;
             }
         }
@@ -163,6 +161,32 @@ mod tests {
         let result = extract_zip(&zip_path, &dest).unwrap();
         assert_eq!(result.len(), 1);
         assert!(dest.join("valid.srt").exists());
+    }
+
+    #[test]
+    fn test_extract_zip_symlink_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zip_path = tmp.path().join("symlink.zip");
+        let file = fs::File::create(&zip_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+
+        // A symlink entry must never be materialized: the target is outside
+        // the extraction directory and the entry itself is not a subtitle.
+        writer
+            .add_symlink("link.srt", "../../outside.srt", options)
+            .unwrap();
+        writer.start_file("valid.srt", options).unwrap();
+        writer.write_all(b"valid content").unwrap();
+        writer.finish().unwrap();
+
+        let dest = tmp.path().join("extracted");
+        fs::create_dir_all(&dest).unwrap();
+
+        let result = extract_zip(&zip_path, &dest).unwrap();
+        assert_eq!(result, vec![dest.join("valid.srt")]);
+        assert!(!dest.join("link.srt").exists());
     }
 
     #[test]

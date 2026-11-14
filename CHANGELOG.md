@@ -14,6 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   follow the new name. No API or behaviour change for consumers; git-URL
   consumers that pin `branch = "main"` should switch to `branch = "master"`.
 
+### Fixed
+- **Archive extraction now runs on `zip` 9.** Extraction still walks entries
+  itself (the crate never calls `ZipArchive::extract`), but the pinned `zip`
+  8.6.0 carried the `extract()` advisories the audit job flagged. `zip` 9
+  changed `ZipFile::name()` to return `ZipResult<Cow<'_, str>>`, so the
+  extractor decodes the name once and falls back to the raw bytes for its
+  diagnostics instead of aborting on an undecodable entry.
+- **The committed lockfile resolves to patched releases for every advisory
+  the security audit reported:** `rustls`, `rustls-webpki`,
+  `webpki-root-certs`, `quinn-proto`, `quinn-udp`, `ctutils`,
+  `zstd`/`zstd-safe`/`zstd-sys` and `zip` all moved to their first patched
+  versions.
+- **The Windows CI leg pre-creates the `ort-sys` DLL destination directory.**
+  `ort-sys` 2.0.0-rc.10 (pinned by `voice_activity_detector`) copies its
+  downloaded DLLs into `target/debug/build/examples` without creating it, so a
+  cold `target` — which any `Cargo.lock` change produces, because the build
+  cache is keyed on the lockfile hash — panicked before the tests started.
+
 ### Documentation
 - README, `AGENTS.md` and the pending-release wording corrected against the
   review of the split changes: the standalone-clone contract, the own-tag

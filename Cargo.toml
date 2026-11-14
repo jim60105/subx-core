@@ -135,7 +135,7 @@ dirs = "6.0"
 num_cpus = "1.0"
 
 # Archive extraction
-zip = "8"
+zip = "9"
 unrar = { version = "0.5", optional = true }
 tar = "0.4"
 flate2 = "1"
