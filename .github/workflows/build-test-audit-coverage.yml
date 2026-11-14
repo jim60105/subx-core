@@ -59,6 +59,17 @@ jobs:
         path: target
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('Cargo.lock') }}
 
+    # ort-sys 2.0.0-rc.10 (pinned by voice_activity_detector 0.2.1) copies its
+    # downloaded DLLs next to the build output and into that directory's
+    # `examples`/`deps` siblings, creating none of them itself. A cold `target`
+    # — which any Cargo.lock change produces, because the build cache is keyed
+    # on the lockfile hash — therefore panics on Windows when it reaches the
+    # `examples` copy. Create that directory up front instead of letting a
+    # dependency bump redden the matrix.
+    - name: Pre-create the ort-sys DLL destination directory
+      shell: bash
+      run: mkdir -p target/debug/build/examples target/debug/build/deps
+
     - name: Quality check (fmt, check, clippy, docs, doctests, tests)
       # Windows runners ship bash, so the same script defines the check set
       # on all three OSes — one definition, three equivalent matrix entries.
