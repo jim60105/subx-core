@@ -18,11 +18,12 @@ The crate SHALL expose a transport-agnostic reporting sink at `subx_core::core::
   - `fn cancelled(&self) -> bool` — whether the caller has asked the current operation to stop. Its default body SHALL return `false`.
 - `pub struct NoopReporter` whose entire implementation is `impl Reporter for NoopReporter {}`.
 - `pub fn noop() -> std::sync::Arc<dyn Reporter>` returning a `NoopReporter` behind an `Arc`.
-- `#[non_exhaustive] pub enum ProgressEvent<'a>` with exactly four variants:
+- `#[non_exhaustive] pub enum ProgressEvent<'a>` with exactly five variants:
   - `Message(&'a str)` — free-form status chatter on the progress stream, retry notices included.
   - `Started { total: u64 }` — a unit-counted progress stream is opening over `total` units.
   - `Advanced { done: u64, total: u64, item: Option<&'a str> }` — `done` of `total` units are complete; `item` names the unit that just finished, when the emitter has a name for it.
   - `Finished { done: u64, total: u64 }` — the stream is closing.
+  - `Translation(TranslationProgress)` — one typed step of a subtitle translation; the payload is defined by the *Core-Owned Translation Progress Payload* requirement.
 
 `ProgressEvent` SHALL derive `Debug`, `Clone`, `PartialEq` and `Eq`. No variant SHALL carry a floating-point field, because that would silently prevent the `Eq` derive from applying and removing a derive from a public type is a major-version change; a consumer that wants a percentage SHALL divide `done` by `total` itself.
 
@@ -59,6 +60,16 @@ The trait SHALL remain **object-safe**: it is stored and passed as `std::sync::A
 - **GIVEN** two `ProgressEvent::Advanced { done: 3, total: 7, item: Some("a.srt") }` values
 - **WHEN** they are compared with `==`
 - **THEN** they SHALL be equal, confirming the `PartialEq` and `Eq` derives still apply after the variant additions
+
+#### Scenario: Translation variant compares by value
+- **GIVEN** two `ProgressEvent::Translation(TranslationProgress::TerminologyStarted)` values
+- **WHEN** they are compared with `==`
+- **THEN** they SHALL be equal, confirming the `PartialEq` and `Eq` derives still apply after the fifth variant was added
+
+#### Scenario: An implementor written against four variants still compiles
+- **GIVEN** a `Reporter` implementor outside the defining module whose `progress` matches `Message`, `Started`, `Advanced`, `Finished` and a `_` arm
+- **WHEN** the crate that defines it is compiled against the version that adds `Translation`
+- **THEN** it SHALL compile unchanged, and a `Translation` event SHALL reach its `_` arm
 
 ### Requirement: Reporter Is Send and Sync
 
@@ -199,6 +210,8 @@ The emitters SHALL be exactly:
 
 Existing `ProgressEvent::Message` call sites SHALL NOT be converted to `Advanced`. In particular `TranslationEngine`'s per-batch progress block (`src/core/translation/engine.rs`) SHALL keep emitting `Message`, because its rendered bytes are fixed by the `core-reporting` *Reporter Attachment Preserves Constructor Signatures* work and by the CLI characterisation tests that lock them.
 
+Translation progress SHALL be carried by `ProgressEvent::Translation` and SHALL NOT open a `Started`/`Advanced`/`Finished` stream.
+
 A dry-run invocation SHALL emit no progress stream, because it performs no units of work.
 
 #### Scenario: Stream shape over three operations
@@ -256,3 +269,26 @@ A caller SHALL be able to stop a core-owned execution loop between units of work
 - **WHEN** `execute_operations_audit` executes four operations
 - **THEN** all four SHALL be attempted and the outcomes SHALL be identical to those produced before the cancellation check was added
 
+### Requirement: Core-Owned Translation Progress Payload
+
+`crate::core::report` SHALL define `#[non_exhaustive] pub enum TranslationProgress` and `#[non_exhaustive] pub enum TranslationPass { Initial, FillIn }`. Both SHALL derive `Debug`, `Clone`, `Copy`, `PartialEq` and `Eq`, SHALL carry only integer and enum fields, and SHALL NOT depend on any translation-engine, AI-provider or presentation type. `TranslationProgress` SHALL have exactly the four variants listed in the scenarios below.
+
+#### Scenario: Terminology variants
+- **GIVEN** the `TranslationProgress` type
+- **WHEN** its variants are enumerated
+- **THEN** it SHALL have `TerminologyStarted` with no fields and `TerminologyFinished { terms: u64 }`, where `terms` is the number of terms the terminology response supplied
+
+#### Scenario: Batch variants
+- **GIVEN** the `TranslationProgress` type
+- **WHEN** its variants are enumerated
+- **THEN** it SHALL have `BatchStarted { pass: TranslationPass, batch: u64, batches: u64, cues: u64, attempt: u32 }` and `BatchFinished { pass: TranslationPass, batch: u64, batches: u64, processed_cues: u64, total_cues: u64 }`
+
+#### Scenario: Payload is Copy and carries no borrowed data
+- **GIVEN** a `TranslationProgress` value received by a `Reporter`
+- **WHEN** the implementor copies it out of the borrowed `ProgressEvent` and sends it to another thread
+- **THEN** the code SHALL compile without cloning any string, confirming the payload is `Copy`, `Send` and has no lifetime parameter
+
+#### Scenario: A consumer match needs a wildcard arm
+- **GIVEN** a `match` over a `TranslationProgress` or a `TranslationPass` outside the defining crate
+- **WHEN** it lists every current variant and no `_` arm
+- **THEN** it SHALL fail to compile, confirming both enums are `#[non_exhaustive]` and can gain variants in a minor release

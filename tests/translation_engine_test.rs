@@ -7,16 +7,20 @@
 //! double that captures cue IDs from the prompt and rewrites placeholder
 //! `__ID<N>__` tokens in the canned response.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use serde_json::json;
 
 use subx_core::Result;
 use subx_core::core::formats::{Subtitle, SubtitleEntry, SubtitleFormatType, SubtitleMetadata};
+use subx_core::core::report::{ProgressEvent, Reporter, TranslationPass, TranslationProgress};
 use subx_core::core::translation::{
     GlossaryEntry, TranslationEngine, TranslationRequest, generate_cue_ids,
 };
+use subx_core::error::SubXError;
 use subx_core::services::ai::{
     AIProvider, AnalysisRequest, ConfidenceScore, MatchResult, VerificationRequest,
 };
@@ -477,4 +481,829 @@ async fn translation_engine_rejects_missing_formatting_placeholder() {
         .await
         .expect_err("missing formatting placeholder must fail");
     assert!(err.to_string().contains("formatting placeholder"));
+}
+
+/// One entry in a shared chronology: a progress event the reporter received,
+/// or a provider request logged at the moment it was issued. Sharing one log
+/// is what lets a test prove the provider's terminology request fell between
+/// `TerminologyStarted` and `TerminologyFinished`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Observed {
+    Message(String),
+    Started,
+    Advanced,
+    Finished,
+    Unknown,
+    Translation(TranslationProgress),
+    Provider(&'static str),
+}
+
+/// Records every progress event; the scripted provider appends to the same
+/// log so request/event interleaving is observable.
+#[derive(Default)]
+struct RecordingReporter {
+    observations: Arc<Mutex<Vec<Observed>>>,
+}
+
+impl RecordingReporter {
+    fn observations(&self) -> Vec<Observed> {
+        self.observations.lock().unwrap().clone()
+    }
+
+    fn translations(&self) -> Vec<TranslationProgress> {
+        self.observations()
+            .into_iter()
+            .filter_map(|observed| match observed {
+                Observed::Translation(progress) => Some(progress),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn messages(&self) -> Vec<String> {
+        self.observations()
+            .into_iter()
+            .filter_map(|observed| match observed {
+                Observed::Message(message) => Some(message),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+impl Reporter for RecordingReporter {
+    fn progress(&self, event: &ProgressEvent<'_>) {
+        // All five current variants are named; the wildcard is required from
+        // outside the defining crate because the enum is `#[non_exhaustive]`.
+        #[allow(unreachable_patterns)]
+        let observed = match event {
+            ProgressEvent::Message(message) => Observed::Message((*message).to_string()),
+            ProgressEvent::Started { .. } => Observed::Started,
+            ProgressEvent::Advanced { .. } => Observed::Advanced,
+            ProgressEvent::Finished { .. } => Observed::Finished,
+            ProgressEvent::Translation(progress) => Observed::Translation(*progress),
+            _ => Observed::Unknown,
+        };
+        self.observations.lock().unwrap().push(observed);
+    }
+}
+
+/// What the scripted provider should answer next.
+enum Step {
+    Terminology(Vec<(&'static str, &'static str)>),
+    TranslateAll,
+    /// Return every prompt cue except the last `n`.
+    TranslateOmitLast(usize),
+    /// Return every prompt cue plus one cue ID that was never requested.
+    TranslateWithUnknownId,
+    Fail(&'static str),
+}
+
+fn no_terms() -> Step {
+    Step::Terminology(Vec::new())
+}
+
+struct ScriptedAI {
+    steps: Mutex<VecDeque<Step>>,
+    observations: Arc<Mutex<Vec<Observed>>>,
+}
+
+impl ScriptedAI {
+    fn new(steps: Vec<Step>, observations: Arc<Mutex<Vec<Observed>>>) -> Arc<Self> {
+        Arc::new(Self {
+            steps: Mutex::new(steps.into()),
+            observations,
+        })
+    }
+
+    fn observe(&self, kind: &'static str) {
+        self.observations
+            .lock()
+            .unwrap()
+            .push(Observed::Provider(kind));
+    }
+}
+
+/// Cue IDs listed in the last user prompt, in prompt order.
+fn prompt_cue_ids(prompt: &str) -> Vec<String> {
+    prompt
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("- id: "))
+        .map(|id| id.trim().to_string())
+        .collect()
+}
+
+fn translations_response(ids: &[String], keep: usize) -> String {
+    let entries: Vec<_> = ids
+        .iter()
+        .take(keep)
+        .enumerate()
+        .map(|(index, id)| json!({"id": id, "text": format!("text-{index}")}))
+        .collect();
+    json!({ "translations": entries }).to_string()
+}
+
+#[async_trait]
+impl AIProvider for ScriptedAI {
+    async fn analyze_content(&self, _r: AnalysisRequest) -> Result<MatchResult> {
+        unreachable!("progress tests do not call analyze_content")
+    }
+
+    async fn verify_match(&self, _r: VerificationRequest) -> Result<ConfidenceScore> {
+        unreachable!("progress tests do not call verify_match")
+    }
+
+    async fn chat_completion(&self, messages: Vec<serde_json::Value>) -> Result<String> {
+        let step = {
+            let mut steps = self.steps.lock().unwrap();
+            steps
+                .pop_front()
+                .expect("ScriptedAI ran out of scripted steps")
+        };
+        let prompt = messages
+            .last()
+            .and_then(|message| message.get("content"))
+            .and_then(|content| content.as_str())
+            .unwrap_or("");
+
+        match step {
+            Step::Terminology(terms) => {
+                self.observe("terminology");
+                let terms: Vec<_> = terms
+                    .iter()
+                    .map(|(source, target)| json!({"source": source, "target": target}))
+                    .collect();
+                Ok(json!({ "terms": terms }).to_string())
+            }
+            Step::TranslateAll => {
+                self.observe("translation");
+                let ids = prompt_cue_ids(prompt);
+                Ok(translations_response(&ids, ids.len()))
+            }
+            Step::TranslateOmitLast(omit) => {
+                self.observe("translation");
+                let ids = prompt_cue_ids(prompt);
+                let keep = ids.len().saturating_sub(omit);
+                Ok(translations_response(&ids, keep))
+            }
+            Step::TranslateWithUnknownId => {
+                self.observe("translation");
+                let mut entries: Vec<_> = prompt_cue_ids(prompt)
+                    .iter()
+                    .enumerate()
+                    .map(|(index, id)| json!({"id": id, "text": format!("text-{index}")}))
+                    .collect();
+                entries.push(json!({
+                    "id": "01900000-9999-7000-8000-000000000000",
+                    "text": "?"
+                }));
+                Ok(json!({ "translations": entries }).to_string())
+            }
+            Step::Fail(message) => {
+                self.observe("failure");
+                Err(SubXError::ai_service(message))
+            }
+        }
+    }
+}
+
+fn progress_request() -> TranslationRequest {
+    TranslationRequest {
+        target_language: "zh-TW".to_string(),
+        source_language: Some("en".to_string()),
+        glossary_text: None,
+        context: None,
+        glossary_entries: vec![],
+    }
+}
+
+fn subtitle_with_cues(count: usize) -> Subtitle {
+    let texts: Vec<String> = (0..count).map(|index| format!("cue {index}")).collect();
+    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+    make_subtitle(&refs)
+}
+
+fn engine_with(
+    reporter: &Arc<RecordingReporter>,
+    batch_size: usize,
+    steps: Vec<Step>,
+) -> TranslationEngine {
+    let provider: Arc<dyn AIProvider> = ScriptedAI::new(steps, Arc::clone(&reporter.observations));
+    let reporter: Arc<dyn Reporter> = reporter.clone();
+    TranslationEngine::new(provider, batch_size)
+        .expect("batch_size is non-zero")
+        .with_reporter(reporter)
+}
+
+const RETRY_NOTICE: &str = "⚠ Translation response contained an unknown cue ID; discarding the batch response and retrying once.";
+
+#[tokio::test]
+async fn translation_progress_brackets_terminology_before_glossary_merge() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(
+        &reporter,
+        10,
+        vec![
+            Step::Terminology(vec![("Alice", "愛麗絲"), ("Bob", "鮑伯")]),
+            Step::TranslateAll,
+        ],
+    );
+    let request = TranslationRequest {
+        glossary_text: Some("Alice = 艾莉絲".to_string()),
+        context: None,
+        glossary_entries: vec![
+            GlossaryEntry {
+                source: "Alice".to_string(),
+                target: "艾莉絲".to_string(),
+            },
+            GlossaryEntry {
+                source: "Carol".to_string(),
+                target: "卡蘿".to_string(),
+            },
+            GlossaryEntry {
+                source: "Dave".to_string(),
+                target: "戴夫".to_string(),
+            },
+        ],
+        ..progress_request()
+    };
+
+    let result = engine
+        .translate_subtitle(make_subtitle(&["Hello Alice", "Goodbye Bob"]), &request)
+        .await
+        .unwrap();
+
+    let observations = reporter.observations();
+    assert_eq!(
+        &observations[..3],
+        &[
+            Observed::Translation(TranslationProgress::TerminologyStarted),
+            Observed::Provider("terminology"),
+            Observed::Translation(TranslationProgress::TerminologyFinished { terms: 2 }),
+        ],
+        "the request must run between the terminology start and finish"
+    );
+    assert_eq!(
+        result.outcome.effective_terminology.len(),
+        4,
+        "two generated terms plus three glossary entries, one of them an override"
+    );
+    assert_eq!(
+        result.outcome.effective_terminology.get("Alice").unwrap(),
+        "艾莉絲",
+        "terms are counted before the glossary overrides the generated map"
+    );
+    assert_eq!(
+        result.outcome.effective_terminology.get("Carol").unwrap(),
+        "卡蘿"
+    );
+}
+
+#[tokio::test]
+async fn translation_progress_reports_each_batch_with_counts() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(
+        &reporter,
+        100,
+        vec![
+            no_terms(),
+            Step::TranslateAll,
+            Step::TranslateAll,
+            Step::TranslateAll,
+        ],
+    );
+
+    let result = engine
+        .translate_subtitle(subtitle_with_cues(250), &progress_request())
+        .await
+        .unwrap();
+    assert_eq!(result.outcome.batch_count, 3);
+
+    assert_eq!(
+        reporter.translations(),
+        vec![
+            TranslationProgress::TerminologyStarted,
+            TranslationProgress::TerminologyFinished { terms: 0 },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 3,
+                cues: 100,
+                attempt: 1,
+            },
+            TranslationProgress::BatchFinished {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 3,
+                processed_cues: 100,
+                total_cues: 250,
+            },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 2,
+                batches: 3,
+                cues: 100,
+                attempt: 1,
+            },
+            TranslationProgress::BatchFinished {
+                pass: TranslationPass::Initial,
+                batch: 2,
+                batches: 3,
+                processed_cues: 200,
+                total_cues: 250,
+            },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 3,
+                batches: 3,
+                cues: 50,
+                attempt: 1,
+            },
+            TranslationProgress::BatchFinished {
+                pass: TranslationPass::Initial,
+                batch: 3,
+                batches: 3,
+                processed_cues: 250,
+                total_cues: 250,
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn translation_progress_reports_missing_cues_and_fill_in() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(
+        &reporter,
+        100,
+        vec![
+            no_terms(),
+            Step::TranslateOmitLast(4),
+            Step::TranslateAll,
+            Step::TranslateAll,
+            Step::TranslateOmitLast(1),
+        ],
+    );
+
+    let result = engine
+        .translate_subtitle(subtitle_with_cues(250), &progress_request())
+        .await
+        .unwrap();
+    assert_eq!(result.outcome.batch_count, 4, "three batches plus fill-in");
+    assert!(
+        !result.subtitle.entries[96].text.is_empty()
+            && !result.subtitle.entries[97].text.is_empty()
+            && !result.subtitle.entries[98].text.is_empty(),
+        "the fill-in response translated three of the four missing cues"
+    );
+    assert!(
+        result.subtitle.entries[99].text.is_empty(),
+        "the fill-in response omitted the last missing cue, which must use the empty fallback"
+    );
+
+    let observations = reporter.observations();
+    let events = reporter.translations();
+    assert_eq!(
+        events[3],
+        TranslationProgress::BatchFinished {
+            pass: TranslationPass::Initial,
+            batch: 1,
+            batches: 3,
+            processed_cues: 96,
+            total_cues: 250,
+        },
+        "four omitted cues do not count as processed"
+    );
+    let finish_index = observations
+        .iter()
+        .position(|observed| *observed == Observed::Translation(events[3]))
+        .expect("the first BatchFinished is in the chronology");
+    assert_eq!(
+        observations[finish_index + 1],
+        Observed::Message("📊 Translation Progress:\n   Processed cues: 96/250".to_string()),
+        "the finish is immediately followed by its text line"
+    );
+
+    let fill_in: Vec<TranslationProgress> = events
+        .iter()
+        .copied()
+        .filter(|event| {
+            matches!(
+                event,
+                TranslationProgress::BatchStarted {
+                    pass: TranslationPass::FillIn,
+                    ..
+                } | TranslationProgress::BatchFinished {
+                    pass: TranslationPass::FillIn,
+                    ..
+                }
+            )
+        })
+        .collect();
+    assert_eq!(
+        fill_in,
+        vec![
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::FillIn,
+                batch: 1,
+                batches: 1,
+                cues: 4,
+                attempt: 1,
+            },
+            TranslationProgress::BatchFinished {
+                pass: TranslationPass::FillIn,
+                batch: 1,
+                batches: 1,
+                processed_cues: 250,
+                total_cues: 250,
+            },
+        ],
+        "the fill-in finish counts the empty fallback as processed"
+    );
+
+    let last_initial_finish = observations
+        .iter()
+        .rposition(|observed| {
+            matches!(
+                observed,
+                Observed::Translation(TranslationProgress::BatchFinished {
+                    pass: TranslationPass::Initial,
+                    ..
+                })
+            )
+        })
+        .expect("the initial pass reported finishes");
+    let fill_in_start = observations
+        .iter()
+        .position(|observed| {
+            matches!(
+                observed,
+                Observed::Translation(TranslationProgress::BatchStarted {
+                    pass: TranslationPass::FillIn,
+                    ..
+                })
+            )
+        })
+        .expect("the fill-in pass reported a start");
+    assert!(
+        fill_in_start > last_initial_finish,
+        "the fill-in pass starts after the last initial batch finished"
+    );
+
+    let fill_in_finish = observations
+        .iter()
+        .position(|observed| {
+            matches!(
+                observed,
+                Observed::Translation(TranslationProgress::BatchFinished {
+                    pass: TranslationPass::FillIn,
+                    ..
+                })
+            )
+        })
+        .expect("the fill-in pass reported a finish");
+    assert_eq!(
+        observations[fill_in_finish + 1],
+        Observed::Message("📊 Translation Progress:\n   Processed cues: 250/250".to_string()),
+        "the fill-in finish is immediately followed by its text line"
+    );
+}
+
+#[tokio::test]
+async fn translation_progress_clean_file_has_no_fill_in_or_stream() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(&reporter, 10, vec![no_terms(), Step::TranslateAll]);
+
+    engine
+        .translate_subtitle(make_subtitle(&["one", "two"]), &progress_request())
+        .await
+        .unwrap();
+
+    let observations = reporter.observations();
+    assert!(
+        !observations.iter().any(|observed| matches!(
+            observed,
+            Observed::Translation(TranslationProgress::BatchStarted {
+                pass: TranslationPass::FillIn,
+                ..
+            }) | Observed::Translation(TranslationProgress::BatchFinished {
+                pass: TranslationPass::FillIn,
+                ..
+            })
+        )),
+        "nothing was missing, so no fill-in event may be reported"
+    );
+    assert!(
+        !observations.iter().any(|observed| matches!(
+            observed,
+            Observed::Started | Observed::Advanced | Observed::Finished
+        )),
+        "translation progress must not open a unit-counted stream"
+    );
+}
+
+#[tokio::test]
+async fn translation_progress_announces_resend_with_attempt_two() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(
+        &reporter,
+        10,
+        vec![no_terms(), Step::TranslateWithUnknownId, Step::TranslateAll],
+    );
+
+    let result = engine
+        .translate_subtitle(make_subtitle(&["one", "two"]), &progress_request())
+        .await
+        .unwrap();
+    assert_eq!(result.outcome.batch_count, 2);
+
+    let events = reporter.translations();
+    assert_eq!(
+        events,
+        vec![
+            TranslationProgress::TerminologyStarted,
+            TranslationProgress::TerminologyFinished { terms: 0 },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 1,
+                cues: 2,
+                attempt: 1,
+            },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 1,
+                cues: 2,
+                attempt: 2,
+            },
+            TranslationProgress::BatchFinished {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 1,
+                processed_cues: 2,
+                total_cues: 2,
+            },
+        ],
+        "the resend is a second start with attempt 2 and a single finish"
+    );
+
+    let observations = reporter.observations();
+    assert_eq!(observations[5], Observed::Message(RETRY_NOTICE.to_string()));
+    assert_eq!(observations[6], Observed::Translation(events[3]));
+}
+
+#[tokio::test]
+async fn translation_progress_second_unknown_id_fails_without_finish() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(
+        &reporter,
+        10,
+        vec![
+            no_terms(),
+            Step::TranslateWithUnknownId,
+            Step::TranslateWithUnknownId,
+        ],
+    );
+
+    let err = engine
+        .translate_subtitle(make_subtitle(&["one", "two"]), &progress_request())
+        .await
+        .expect_err("the second unknown cue ID fails the file");
+    assert!(
+        err.to_string().contains("unknown cue ID after retry"),
+        "unexpected: {err}"
+    );
+
+    assert_eq!(
+        reporter.translations(),
+        vec![
+            TranslationProgress::TerminologyStarted,
+            TranslationProgress::TerminologyFinished { terms: 0 },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 1,
+                cues: 2,
+                attempt: 1,
+            },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 1,
+                cues: 2,
+                attempt: 2,
+            },
+        ],
+        "a failed batch reports both starts and no finish"
+    );
+}
+
+#[tokio::test]
+async fn translation_progress_failed_terminology_emits_no_finish() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(
+        &reporter,
+        10,
+        vec![Step::Fail("terminology request failed")],
+    );
+
+    let err = engine
+        .translate_subtitle(make_subtitle(&["one"]), &progress_request())
+        .await
+        .expect_err("a failed terminology request fails the file");
+    assert!(err.to_string().contains("terminology request failed"));
+    assert_eq!(
+        reporter.translations(),
+        vec![TranslationProgress::TerminologyStarted],
+        "the started event is reported, the finish is not"
+    );
+}
+
+#[tokio::test]
+async fn translation_progress_failed_batch_emits_no_finish() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(
+        &reporter,
+        10,
+        vec![no_terms(), Step::Fail("translation request failed")],
+    );
+
+    let err = engine
+        .translate_subtitle(make_subtitle(&["one", "two"]), &progress_request())
+        .await
+        .expect_err("a failed batch request fails the file");
+    assert!(err.to_string().contains("translation request failed"));
+    assert_eq!(
+        reporter.translations(),
+        vec![
+            TranslationProgress::TerminologyStarted,
+            TranslationProgress::TerminologyFinished { terms: 0 },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 1,
+                cues: 2,
+                attempt: 1,
+            },
+        ],
+        "a failed batch reports its start and no finish"
+    );
+}
+
+#[tokio::test]
+async fn text_progress_messages_are_unchanged_and_follow_batch_finishes() {
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(
+        &reporter,
+        3,
+        vec![
+            no_terms(),
+            Step::TranslateAll,
+            Step::TranslateAll,
+            Step::TranslateAll,
+        ],
+    );
+
+    engine
+        .translate_subtitle(subtitle_with_cues(7), &progress_request())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        reporter.messages(),
+        vec![
+            "📊 Translation Progress:\n   Processed cues: 3/7",
+            "📊 Translation Progress:\n   Processed cues: 6/7",
+            "📊 Translation Progress:\n   Processed cues: 7/7",
+        ],
+        "the text channel keeps the bytes it had before this change"
+    );
+
+    let observations = reporter.observations();
+    for (index, observed) in observations.iter().enumerate() {
+        if let Observed::Translation(TranslationProgress::BatchFinished {
+            processed_cues,
+            total_cues,
+            ..
+        }) = observed
+        {
+            match observations.get(index + 1) {
+                Some(Observed::Message(message)) => assert!(
+                    message.contains(&format!("Processed cues: {processed_cues}/{total_cues}")),
+                    "BatchFinished {processed_cues}/{total_cues} not mirrored by {message:?}"
+                ),
+                other => panic!("BatchFinished must be followed by its message, got {other:?}"),
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn empty_or_targetless_translation_reports_no_events() {
+    // Empty subtitle: the engine returns before the terminology pass.
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(&reporter, 10, vec![]);
+    let empty = Subtitle::new(
+        SubtitleFormatType::Srt,
+        SubtitleMetadata::new(SubtitleFormatType::Srt),
+    );
+    engine
+        .translate_subtitle(empty, &progress_request())
+        .await
+        .unwrap();
+    assert!(
+        reporter.translations().is_empty(),
+        "an empty subtitle reports no structured translation step"
+    );
+
+    // Empty target language: the configuration error returns before any
+    // progress event and without calling the provider.
+    let reporter = Arc::new(RecordingReporter::default());
+    let engine = engine_with(&reporter, 10, vec![]);
+    let mut request = progress_request();
+    request.target_language = "   ".to_string();
+    let err = engine
+        .translate_subtitle(make_subtitle(&["one"]), &request)
+        .await
+        .expect_err("an empty target language is rejected");
+    assert!(err.to_string().contains("target language"));
+    assert!(
+        reporter.observations().is_empty(),
+        "no progress event may precede the target-language validation error"
+    );
+}
+
+/// A `TranslationEngine` with no reporter attached must print nothing: the
+/// default sink is `NoopReporter` and the engine has no direct terminal path.
+///
+/// In-process capture of `println!`/`eprintln!` would need global state
+/// (forbidden), so the child process re-executes this test binary in a mode
+/// that runs the translation through the default reporter while the parent
+/// asserts the child's captured streams carry no engine output.
+#[tokio::test]
+async fn engine_without_reporter_prints_nothing() {
+    if std::env::var_os("SUBX_TEST_NOOP_TRANSLATION_CHILD").is_some() {
+        let term_resp = r#"{"terms":[]}"#;
+        let cues_resp = r#"{"translations":[{"id":"__ID0__","text":"翻譯後"}]}"#;
+        let provider: Arc<dyn AIProvider> = PlaceholderAI::new(vec![term_resp, cues_resp]);
+        let engine = TranslationEngine::new(provider, 10).expect("batch_size > 0");
+        let result = engine
+            .translate_subtitle(make_subtitle(&["Hello"]), &progress_request())
+            .await
+            .unwrap();
+        assert_eq!(result.subtitle.entries[0].text, "翻譯後");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("engine_without_reporter_prints_nothing")
+        .arg("--exact")
+        .env("SUBX_TEST_NOOP_TRANSLATION_CHILD", "1")
+        .env("RUST_TEST_THREADS", "1")
+        .output()
+        .expect("re-exec test binary");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        output.status.success(),
+        "child test failed:\n{stderr}\nstdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("1 passed"),
+        "the child did not run the translation test:\n{stdout}"
+    );
+    for marker in [
+        "📊 Translation Progress",
+        "Processed cues",
+        "⚠ Translation response",
+    ] {
+        assert!(
+            !stdout.contains(marker) && !stderr.contains(marker),
+            "reporter-less TranslationEngine leaked {marker:?} — stdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+}
+
+/// A reporter implementation written against the four variants that existed
+/// before this change: it names each of them plus a wildcard and must keep
+/// compiling when `ProgressEvent::Translation` is added.
+fn classify_with_four_variants(event: &ProgressEvent<'_>) -> u8 {
+    match event {
+        ProgressEvent::Message(_) => 0,
+        ProgressEvent::Started { .. } => 1,
+        ProgressEvent::Advanced { .. } => 2,
+        ProgressEvent::Finished { .. } => 3,
+        _ => 4,
+    }
+}
+
+#[test]
+fn four_variant_match_receives_translation_in_wildcard() {
+    let event = ProgressEvent::Translation(TranslationProgress::TerminologyStarted);
+    assert_eq!(
+        classify_with_four_variants(&event),
+        4,
+        "the new variant reaches a pre-existing wildcard arm"
+    );
 }

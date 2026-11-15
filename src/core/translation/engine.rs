@@ -11,6 +11,7 @@ use serde_json::json;
 use crate::Result;
 use crate::core::formats::Subtitle;
 use crate::core::formats::manager::FormatManager;
+use crate::core::report::{ProgressEvent, TranslationPass, TranslationProgress};
 use crate::core::translation::CueIdGenerator;
 use crate::core::translation::request::{
     GlossaryEntry, TerminologyMap, TranslationOutcome, TranslationRequest, TranslationResult,
@@ -23,6 +24,17 @@ use crate::services::ai::translation_prompts::{
     build_translation_prompt, is_unknown_cue_id_error, parse_terminology_response,
     parse_translation_response_partial,
 };
+
+/// Position of one cue batch within its translation pass.
+///
+/// Shared by the `BatchStarted` events a batch emits and the `BatchFinished`
+/// its caller emits once the response has been accepted.
+#[derive(Debug, Clone, Copy)]
+struct BatchDescriptor {
+    pass: TranslationPass,
+    batch: u64,
+    batches: u64,
+}
 
 /// Orchestrates subtitle translation through an [`AIProvider`].
 ///
@@ -70,9 +82,12 @@ impl TranslationEngine {
     ///
     /// # Arguments
     ///
-    /// * `reporter` - Sink for progress chatter (batch progress, retry
-    ///   notices); the CLI attaches its `TerminalReporter` at command
-    ///   boundaries, library consumers may pass any implementation.
+    /// * `reporter` - Sink for progress chatter and structured events: the
+    ///   human-oriented `Processed cues` lines and retry notices, plus one
+    ///   [`ProgressEvent::Translation`] per translation step (the terminology
+    ///   bracket, each batch's send and acceptance, and the fill-in pass).
+    ///   The CLI attaches its `TerminalReporter` at command boundaries;
+    ///   library consumers may pass any implementation.
     pub fn with_reporter(mut self, reporter: Arc<dyn crate::core::report::Reporter>) -> Self {
         self.reporter = reporter;
         self
@@ -81,6 +96,12 @@ impl TranslationEngine {
     /// Clone the attached reporting sink for use across `await` points.
     fn reporter(&self) -> Arc<dyn crate::core::report::Reporter> {
         Arc::clone(&self.reporter)
+    }
+
+    /// Emit one structured translation-progress event.
+    fn report_translation(&self, progress: TranslationProgress) {
+        self.reporter
+            .progress(&ProgressEvent::Translation(progress));
     }
 
     /// Get the configured AI batch size.
@@ -108,6 +129,23 @@ impl TranslationEngine {
     ///    against the requested cue IDs before applying any text changes.
     /// 4. Reapply translated text to the parsed subtitle while preserving
     ///    timing, ordering, cue counts, and styling metadata.
+    ///
+    /// # Progress reporting
+    ///
+    /// When a reporter is attached ([`Self::with_reporter`]), every step also
+    /// reports a typed [`ProgressEvent::Translation`] event:
+    ///
+    /// - `TerminologyStarted`, then `TerminologyFinished { terms }` once the
+    ///   terminology response is accepted;
+    /// - `BatchStarted`/`BatchFinished` for each initial batch, in file order,
+    ///   with `BatchStarted.attempt` set to `2` for a resend after a response
+    ///   with an unknown cue ID;
+    /// - a fill-in batch with `pass: FillIn` when cues are still missing.
+    ///
+    /// The existing `Processed cues: <done>/<total>` messages keep their exact
+    /// bytes and order; each `BatchFinished` immediately precedes the message
+    /// that mirrors its counts. A failed or abandoned request emits no
+    /// finishing event.
     pub async fn translate_subtitle(
         &self,
         subtitle: Subtitle,
@@ -146,16 +184,23 @@ impl TranslationEngine {
             .collect();
 
         // 2. Terminology extraction + glossary merge.
+        self.report_translation(TranslationProgress::TerminologyStarted);
         let generated_terms = self
             .extract_terminology(&terminology_texts, request)
             .await?;
+        self.report_translation(TranslationProgress::TerminologyFinished {
+            terms: generated_terms.len() as u64,
+        });
         let effective_terminology = merge_terminology(generated_terms, &request.glossary_entries);
 
         // 3. Batched translation with cue ID validation. Missing IDs are
         //    retried once after all initial batches have completed.
+        let chunks = chunk_ranges(subtitle.entries.len(), self.batch_size);
+        let batches = chunks.len() as u64;
+        let total_cues = cue_ids.len() as u64;
         let mut translations: BTreeMap<String, String> = BTreeMap::new();
         let mut batch_count = 0usize;
-        for chunk_indices in chunk_ranges(subtitle.entries.len(), self.batch_size) {
+        for (batch_index, chunk_indices) in chunks.into_iter().enumerate() {
             let mut batch_cues: Vec<(String, String)> = Vec::with_capacity(chunk_indices.len());
             let mut batch_ids: Vec<String> = Vec::with_capacity(chunk_indices.len());
             for &i in &chunk_indices {
@@ -163,27 +208,46 @@ impl TranslationEngine {
                 batch_ids.push(cue_ids[i].clone());
             }
 
+            let descriptor = BatchDescriptor {
+                pass: TranslationPass::Initial,
+                batch: batch_index as u64 + 1,
+                batches,
+            };
             let (map, issued_batches) = self
                 .translate_batch_with_unknown_retry(
                     &batch_cues,
                     &batch_ids,
                     request,
                     &effective_terminology,
+                    descriptor,
                 )
                 .await?;
             for (id, text) in map {
                 translations.insert(id, text);
             }
             batch_count += issued_batches;
+            self.report_translation(TranslationProgress::BatchFinished {
+                pass: descriptor.pass,
+                batch: descriptor.batch,
+                batches: descriptor.batches,
+                processed_cues: translations.len() as u64,
+                total_cues,
+            });
             self.reporter()
-                .progress(&crate::core::report::ProgressEvent::Message(
-                    &format_translation_progress(translations.len(), cue_ids.len()),
-                ));
+                .progress(&ProgressEvent::Message(&format_translation_progress(
+                    translations.len(),
+                    cue_ids.len(),
+                )));
         }
 
         let mut empty_fallback_ids = BTreeSet::new();
         let missing_after_initial = missing_translation_indices(&cue_ids, &translations);
         if !missing_after_initial.is_empty() {
+            let descriptor = BatchDescriptor {
+                pass: TranslationPass::FillIn,
+                batch: 1,
+                batches: 1,
+            };
             let (retry_map, issued_batches) = self
                 .retry_missing_translations(
                     &cue_ids,
@@ -191,6 +255,7 @@ impl TranslationEngine {
                     &missing_after_initial,
                     request,
                     &effective_terminology,
+                    descriptor,
                 )
                 .await?;
             for (id, text) in retry_map {
@@ -203,10 +268,18 @@ impl TranslationEngine {
                 translations.insert(id.clone(), String::new());
                 empty_fallback_ids.insert(id);
             }
+            self.report_translation(TranslationProgress::BatchFinished {
+                pass: descriptor.pass,
+                batch: descriptor.batch,
+                batches: descriptor.batches,
+                processed_cues: translations.len() as u64,
+                total_cues,
+            });
             self.reporter()
-                .progress(&crate::core::report::ProgressEvent::Message(
-                    &format_translation_progress(translations.len(), cue_ids.len()),
-                ));
+                .progress(&ProgressEvent::Message(&format_translation_progress(
+                    translations.len(),
+                    cue_ids.len(),
+                )));
         }
 
         // 4. Reapply translated text to the original subtitle entries while
@@ -282,6 +355,7 @@ impl TranslationEngine {
         missing_indices: &[usize],
         request: &TranslationRequest,
         terminology: &TerminologyMap,
+        position: BatchDescriptor,
     ) -> Result<(BTreeMap<String, String>, usize)> {
         let mut retry_cues = Vec::with_capacity(missing_indices.len());
         let mut retry_ids = Vec::with_capacity(missing_indices.len());
@@ -293,8 +367,14 @@ impl TranslationEngine {
             retry_ids.push(cue_ids[idx].clone());
         }
 
-        self.translate_batch_with_unknown_retry(&retry_cues, &retry_ids, request, terminology)
-            .await
+        self.translate_batch_with_unknown_retry(
+            &retry_cues,
+            &retry_ids,
+            request,
+            terminology,
+            position,
+        )
+        .await
     }
 
     async fn translate_batch_with_unknown_retry(
@@ -303,7 +383,16 @@ impl TranslationEngine {
         batch_ids: &[String],
         request: &TranslationRequest,
         terminology: &TerminologyMap,
+        position: BatchDescriptor,
     ) -> Result<(BTreeMap<String, String>, usize)> {
+        let cues = batch_cues.len() as u64;
+        self.report_translation(TranslationProgress::BatchStarted {
+            pass: position.pass,
+            batch: position.batch,
+            batches: position.batches,
+            cues,
+            attempt: 1,
+        });
         match self
             .translate_batch_once(batch_cues, batch_ids, request, terminology)
             .await
@@ -312,9 +401,16 @@ impl TranslationEngine {
             Err(err) if is_unknown_cue_id_error(&err) => {
                 // Retry notice on the progress stream — the reporter
                 // decides whether it reaches the terminal.
-                self.reporter().progress(&crate::core::report::ProgressEvent::Message(
+                self.reporter().progress(&ProgressEvent::Message(
                     "⚠ Translation response contained an unknown cue ID; discarding the batch response and retrying once.",
                 ));
+                self.report_translation(TranslationProgress::BatchStarted {
+                    pass: position.pass,
+                    batch: position.batch,
+                    batches: position.batches,
+                    cues,
+                    attempt: 2,
+                });
                 match self
                     .translate_batch_once(batch_cues, batch_ids, request, terminology)
                     .await
