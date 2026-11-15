@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-15
+
+### Added
+- **Structured translation progress events.** `ProgressEvent` gained a
+  `Translation(TranslationProgress)` variant carrying a `Copy` payload of
+  integers and enums: the terminology request starting and finishing, each
+  cue batch starting (with its 1-based index, batch count, cue count and
+  retry attempt) and finishing (with processed and total cue counts), and the
+  fill-in pass as a `TranslationPass::FillIn` batch. A consumer can draw
+  per-file translation progress from typed events without parsing text or
+  wrapping an AI provider. The existing `Processed cues: <done>/<total>`
+  progress lines keep their exact bytes and order.
+
 ## [1.0.1] - 2026-11-14
 
 ### Changed
@@ -110,6 +123,7 @@ surface described below is frozen for the 1.0 release line.
   two consumers of the crate, the supported standalone-clone workflow, the
   feature flags, and the module guide including the reporting seam.
 
-[Unreleased]: https://github.com/jim60105/subx-core/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/jim60105/subx-core/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/jim60105/subx-core/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/jim60105/subx-core/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jim60105/subx-core/releases/tag/v1.0.0
