@@ -206,13 +206,174 @@ pub struct AiUsage {
     pub total_tokens: u32,
 }
 
+/// Which pass of a subtitle translation a cue batch belongs to.
+///
+/// [`TranslationPass::Initial`] is the pass that translates every cue of the
+/// file once. [`TranslationPass::FillIn`] re-asks only for the cues the
+/// initial pass left missing.
+///
+/// The enum is `#[non_exhaustive]`, so a downstream `match` needs a wildcard
+/// arm; see [`TranslationProgress`] for the contract.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranslationPass {
+    /// The first pass over every cue in the file.
+    Initial,
+    /// The second pass that re-asks for cues the initial pass left missing.
+    FillIn,
+}
+
+/// One typed step of a subtitle translation.
+///
+/// Translation progress is carried by [`ProgressEvent::Translation`] in
+/// addition to the human-oriented [`ProgressEvent::Message`] lines the engine
+/// already emits. The payload is [`Copy`] and holds only integers and enums,
+/// so a consumer can forward it to another thread or across an IPC channel
+/// without cloning or borrowing.
+///
+/// # Event order
+///
+/// Per subtitle file the engine reports:
+///
+/// 1. [`TranslationProgress::TerminologyStarted`], then
+///    [`TranslationProgress::TerminologyFinished`] once the terminology
+///    response is accepted;
+/// 2. for each initial batch, [`TranslationProgress::BatchStarted`] followed
+///    by [`TranslationProgress::BatchFinished`];
+/// 3. when cues are still missing, one fill-in batch with
+///    [`TranslationPass::FillIn`], again started and finished.
+///
+/// A request that fails, or one whose future is dropped, emits its `Started`
+/// event and no matching `Finished` event; the failure travels in the
+/// returned error. A batch whose first response contains an unknown cue ID is
+/// sent again, and each send is announced by its own `BatchStarted` (`attempt`
+/// 1, then 2).
+///
+/// # Forward compatibility
+///
+/// The enum is `#[non_exhaustive]`: variants may be added in a minor release,
+/// so a downstream `match` needs a wildcard arm. The fields of an existing
+/// variant are fixed — adding a field to one of them is a breaking change.
+///
+/// # Examples
+///
+/// ```
+/// use subx_core::core::report::{
+///     ProgressEvent, Reporter, TranslationPass, TranslationProgress,
+/// };
+///
+/// /// Tracks the last finished batch, ignoring every other event.
+/// struct BatchTail(std::sync::Mutex<Option<(u64, u64)>>);
+///
+/// impl Reporter for BatchTail {
+///     fn progress(&self, event: &ProgressEvent<'_>) {
+///         match event {
+///             ProgressEvent::Translation(TranslationProgress::BatchFinished {
+///                 processed_cues,
+///                 total_cues,
+///                 ..
+///             }) => *self.0.lock().unwrap() = Some((*processed_cues, *total_cues)),
+///             // Other progress events — including future ones — are uninteresting.
+///             _ => {}
+///         }
+///     }
+/// }
+///
+/// let reporter = BatchTail(std::sync::Mutex::new(None));
+/// reporter.progress(&ProgressEvent::Translation(
+///     TranslationProgress::BatchFinished {
+///         pass: TranslationPass::Initial,
+///         batch: 2,
+///         batches: 2,
+///         processed_cues: 250,
+///         total_cues: 250,
+///     },
+/// ));
+/// assert_eq!(*reporter.0.lock().unwrap(), Some((250, 250)));
+/// ```
+///
+/// # Non-exhaustive contract
+///
+/// A match that names every variant without a wildcard arm does not compile
+/// outside this crate:
+///
+/// ```compile_fail,E0004
+/// use subx_core::core::report::TranslationProgress;
+///
+/// fn classify(progress: TranslationProgress) {
+///     match progress {
+///         TranslationProgress::TerminologyStarted => {}
+///         TranslationProgress::TerminologyFinished { .. } => {}
+///         TranslationProgress::BatchStarted { .. } => {}
+///         TranslationProgress::BatchFinished { .. } => {}
+///     }
+/// }
+/// ```
+///
+/// The same holds for [`TranslationPass`]:
+///
+/// ```compile_fail,E0004
+/// use subx_core::core::report::TranslationPass;
+///
+/// fn classify(pass: TranslationPass) {
+///     match pass {
+///         TranslationPass::Initial => {}
+///         TranslationPass::FillIn => {}
+///     }
+/// }
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranslationProgress {
+    /// The terminology request is in flight.
+    TerminologyStarted,
+    /// The terminology response was accepted; `terms` is its entry count.
+    TerminologyFinished {
+        /// Number of terms the response supplied, before any glossary merge.
+        terms: u64,
+    },
+    /// One cue batch is in flight.
+    BatchStarted {
+        /// Which pass this batch belongs to.
+        pass: TranslationPass,
+        /// 1-based index of the batch within its pass.
+        batch: u64,
+        /// Number of batches the pass will issue.
+        batches: u64,
+        /// Number of cues in this batch.
+        cues: u64,
+        /// `1` for the first send, `2` for the resend after a response with
+        /// an unknown cue ID.
+        attempt: u32,
+    },
+    /// One cue batch's response was accepted.
+    BatchFinished {
+        /// Which pass this batch belongs to.
+        pass: TranslationPass,
+        /// 1-based index of the batch within its pass.
+        batch: u64,
+        /// Number of batches the pass issued.
+        batches: u64,
+        /// Cues translated so far in the file.
+        ///
+        /// The fill-in pass runs after empty fallbacks have been inserted for
+        /// cues still missing, so its `processed_cues` equals `total_cues`
+        /// even when a cue received the empty fallback.
+        processed_cues: u64,
+        /// Number of cues in the file being translated.
+        total_cues: u64,
+    },
+}
+
 /// An event on the long-running-work progress stream.
 ///
 /// Covers free-form status chatter emitted while long work advances
 /// ([`ProgressEvent::Message`]: worker-pool drain notices, per-batch
 /// translation progress, retry notices) and the structured unit-counted
 /// stream (`Started` / `Advanced` / `Finished`) opened by loops that know
-/// their work in advance.
+/// their work in advance. A subtitle translation additionally reports typed
+/// per-file steps through [`ProgressEvent::Translation`]; those are not a
+/// unit-counted stream and may arrive many times per operation.
 ///
 /// # Stream contract
 ///
@@ -223,6 +384,10 @@ pub struct AiUsage {
 /// stopped early (cancellation or a first-error abort). A reporter keeps at
 /// most **one open stream at a time**: a second `Started` replaces the
 /// current stream rather than nesting a second one.
+///
+/// [`ProgressEvent::Translation`] events are not part of that stream: they
+/// never open or replace it, and they carry their own payload contract in
+/// [`TranslationProgress`].
 ///
 /// The enum stays `#[non_exhaustive]` so future variants remain a
 /// minor-version event; every consumer `match` therefore needs a wildcard
@@ -291,6 +456,13 @@ pub enum ProgressEvent<'a> {
         /// Total units the opening `Started` announced.
         total: u64,
     },
+    /// One typed step of a subtitle translation.
+    ///
+    /// Reports the terminology pass, each cue batch's send and acceptance
+    /// (resends included) and the fill-in pass. Unlike the unit-counted
+    /// variants above, these events may arrive many times per file and do not
+    /// open a `Started`/`Advanced`/`Finished` stream.
+    Translation(TranslationProgress),
 }
 
 /// `dyn Reporter` crosses thread boundaries inside engines; pin the bound.
@@ -333,7 +505,7 @@ mod tests {
             ));
         }
         fn progress(&self, event: &ProgressEvent<'_>) {
-            // All four real variants are named; the wildcard stays for
+            // All five real variants are named; the wildcard stays for
             // future non_exhaustive additions.
             #[allow(unreachable_patterns)]
             match event {
@@ -360,6 +532,38 @@ mod tests {
                         .lock()
                         .unwrap()
                         .push(format!("progress:finished:{done}/{total}"));
+                }
+                ProgressEvent::Translation(progress) => {
+                    let label = match progress {
+                        TranslationProgress::TerminologyStarted => {
+                            "terminology-started".to_string()
+                        }
+                        TranslationProgress::TerminologyFinished { terms } => {
+                            format!("terminology-finished:{terms}")
+                        }
+                        TranslationProgress::BatchStarted {
+                            pass,
+                            batch,
+                            batches,
+                            cues,
+                            attempt,
+                        } => {
+                            format!("batch-started:{pass:?}:{batch}/{batches}:{cues}:{attempt}")
+                        }
+                        TranslationProgress::BatchFinished {
+                            pass,
+                            batch,
+                            batches,
+                            processed_cues,
+                            total_cues,
+                        } => format!(
+                            "batch-finished:{pass:?}:{batch}/{batches}:{processed_cues}/{total_cues}"
+                        ),
+                    };
+                    self.events
+                        .lock()
+                        .unwrap()
+                        .push(format!("progress:translation:{label}"));
                 }
                 _ => self.events.lock().unwrap().push("progress:_".to_string()),
             }
@@ -521,6 +725,121 @@ mod tests {
             })
             .collect();
         assert_eq!(kinds, ["message", "started", "advanced", "finished"]);
+    }
+
+    #[test]
+    fn translation_progress_compares_by_value() {
+        assert_eq!(
+            ProgressEvent::Translation(TranslationProgress::TerminologyStarted),
+            ProgressEvent::Translation(TranslationProgress::TerminologyStarted)
+        );
+        assert_ne!(
+            ProgressEvent::Translation(TranslationProgress::TerminologyFinished { terms: 2 }),
+            ProgressEvent::Translation(TranslationProgress::TerminologyFinished { terms: 3 })
+        );
+        assert_eq!(
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 3,
+                cues: 100,
+                attempt: 1,
+            },
+            TranslationProgress::BatchStarted {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 3,
+                cues: 100,
+                attempt: 1,
+            }
+        );
+        assert_ne!(
+            TranslationProgress::BatchFinished {
+                pass: TranslationPass::FillIn,
+                batch: 1,
+                batches: 1,
+                processed_cues: 250,
+                total_cues: 250,
+            },
+            TranslationProgress::BatchFinished {
+                pass: TranslationPass::Initial,
+                batch: 1,
+                batches: 1,
+                processed_cues: 250,
+                total_cues: 250,
+            }
+        );
+    }
+
+    #[test]
+    fn translation_payload_is_copy_send_without_lifetime() {
+        // `'static` is the compile-time proxy for "no lifetime parameter";
+        // `Copy` and `Send` are the portability guarantees the payload makes.
+        const _: fn() = || {
+            fn assert_copy_send<T: Copy + Send + 'static>() {}
+            assert_copy_send::<TranslationProgress>();
+            assert_copy_send::<TranslationPass>();
+        };
+
+        let original = TranslationProgress::BatchFinished {
+            pass: TranslationPass::Initial,
+            batch: 1,
+            batches: 2,
+            processed_cues: 100,
+            total_cues: 200,
+        };
+        let copy = original;
+        assert_eq!(original, copy);
+        let moved = std::thread::spawn(move || copy).join().unwrap();
+        assert_eq!(moved, original);
+    }
+
+    #[test]
+    fn four_variant_reporter_receives_translation_in_wildcard() {
+        // A v1.0-era implementor: four variants named, wildcard last, written
+        // before `Translation` existed. It still compiles and the new event
+        // lands in the wildcard arm.
+        struct FourVariantReporter {
+            seen: Mutex<Vec<&'static str>>,
+        }
+        impl Reporter for FourVariantReporter {
+            fn progress(&self, event: &ProgressEvent<'_>) {
+                let kind = match event {
+                    ProgressEvent::Message(_) => "message",
+                    ProgressEvent::Started { .. } => "started",
+                    ProgressEvent::Advanced { .. } => "advanced",
+                    ProgressEvent::Finished { .. } => "finished",
+                    _ => "unknown",
+                };
+                self.seen.lock().unwrap().push(kind);
+            }
+        }
+
+        let reporter = FourVariantReporter {
+            seen: Mutex::new(Vec::new()),
+        };
+        reporter.progress(&ProgressEvent::Translation(
+            TranslationProgress::TerminologyStarted,
+        ));
+        assert_eq!(*reporter.seen.lock().unwrap(), vec!["unknown"]);
+    }
+
+    #[test]
+    fn recording_reporter_records_translation_events() {
+        let reporter = RecordingReporter::default();
+        reporter.progress(&ProgressEvent::Translation(
+            TranslationProgress::BatchFinished {
+                pass: TranslationPass::FillIn,
+                batch: 1,
+                batches: 1,
+                processed_cues: 250,
+                total_cues: 250,
+            },
+        ));
+        assert_eq!(
+            reporter.recorded(),
+            vec!["progress:translation:batch-finished:FillIn:1/1:250/250"]
+        );
     }
 
     #[test]
