@@ -493,6 +493,7 @@ enum Observed {
     Started,
     Advanced,
     Finished,
+    Unknown,
     Translation(TranslationProgress),
     Provider(&'static str),
 }
@@ -541,7 +542,7 @@ impl Reporter for RecordingReporter {
             ProgressEvent::Advanced { .. } => Observed::Advanced,
             ProgressEvent::Finished { .. } => Observed::Finished,
             ProgressEvent::Translation(progress) => Observed::Translation(*progress),
-            _ => Observed::Finished,
+            _ => Observed::Unknown,
         };
         self.observations.lock().unwrap().push(observed);
     }
@@ -849,6 +850,16 @@ async fn translation_progress_reports_missing_cues_and_fill_in() {
         .await
         .unwrap();
     assert_eq!(result.outcome.batch_count, 4, "three batches plus fill-in");
+    assert!(
+        !result.subtitle.entries[96].text.is_empty()
+            && !result.subtitle.entries[97].text.is_empty()
+            && !result.subtitle.entries[98].text.is_empty(),
+        "the fill-in response translated three of the four missing cues"
+    );
+    assert!(
+        result.subtitle.entries[99].text.is_empty(),
+        "the fill-in response omitted the last missing cue, which must use the empty fallback"
+    );
 
     let observations = reporter.observations();
     let events = reporter.translations();
@@ -908,6 +919,53 @@ async fn translation_progress_reports_missing_cues_and_fill_in() {
             },
         ],
         "the fill-in finish counts the empty fallback as processed"
+    );
+
+    let last_initial_finish = observations
+        .iter()
+        .rposition(|observed| {
+            matches!(
+                observed,
+                Observed::Translation(TranslationProgress::BatchFinished {
+                    pass: TranslationPass::Initial,
+                    ..
+                })
+            )
+        })
+        .expect("the initial pass reported finishes");
+    let fill_in_start = observations
+        .iter()
+        .position(|observed| {
+            matches!(
+                observed,
+                Observed::Translation(TranslationProgress::BatchStarted {
+                    pass: TranslationPass::FillIn,
+                    ..
+                })
+            )
+        })
+        .expect("the fill-in pass reported a start");
+    assert!(
+        fill_in_start > last_initial_finish,
+        "the fill-in pass starts after the last initial batch finished"
+    );
+
+    let fill_in_finish = observations
+        .iter()
+        .position(|observed| {
+            matches!(
+                observed,
+                Observed::Translation(TranslationProgress::BatchFinished {
+                    pass: TranslationPass::FillIn,
+                    ..
+                })
+            )
+        })
+        .expect("the fill-in pass reported a finish");
+    assert_eq!(
+        observations[fill_in_finish + 1],
+        Observed::Message("📊 Translation Progress:\n   Processed cues: 250/250".to_string()),
+        "the fill-in finish is immediately followed by its text line"
     );
 }
 
@@ -1174,6 +1232,57 @@ async fn empty_or_targetless_translation_reports_no_events() {
         reporter.observations().is_empty(),
         "no progress event may precede the target-language validation error"
     );
+}
+
+/// A `TranslationEngine` with no reporter attached must print nothing: the
+/// default sink is `NoopReporter` and the engine has no direct terminal path.
+///
+/// In-process capture of `println!`/`eprintln!` would need global state
+/// (forbidden), so the child process re-executes this test binary in a mode
+/// that runs the translation through the default reporter while the parent
+/// asserts the child's captured streams carry no engine output.
+#[tokio::test]
+async fn engine_without_reporter_prints_nothing() {
+    if std::env::var_os("SUBX_TEST_NOOP_TRANSLATION_CHILD").is_some() {
+        let term_resp = r#"{"terms":[]}"#;
+        let cues_resp = r#"{"translations":[{"id":"__ID0__","text":"翻譯後"}]}"#;
+        let provider: Arc<dyn AIProvider> = PlaceholderAI::new(vec![term_resp, cues_resp]);
+        let engine = TranslationEngine::new(provider, 10).expect("batch_size > 0");
+        let result = engine
+            .translate_subtitle(make_subtitle(&["Hello"]), &progress_request())
+            .await
+            .unwrap();
+        assert_eq!(result.subtitle.entries[0].text, "翻譯後");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("engine_without_reporter_prints_nothing")
+        .arg("--exact")
+        .env("SUBX_TEST_NOOP_TRANSLATION_CHILD", "1")
+        .env("RUST_TEST_THREADS", "1")
+        .output()
+        .expect("re-exec test binary");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        output.status.success(),
+        "child test failed:\n{stderr}\nstdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("1 passed"),
+        "the child did not run the translation test:\n{stdout}"
+    );
+    for marker in [
+        "📊 Translation Progress",
+        "Processed cues",
+        "⚠ Translation response",
+    ] {
+        assert!(
+            !stdout.contains(marker) && !stderr.contains(marker),
+            "reporter-less TranslationEngine leaked {marker:?} — stdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
 }
 
 /// A reporter implementation written against the four variants that existed
